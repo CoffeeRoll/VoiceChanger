@@ -122,9 +122,32 @@ public sealed class MainWindowTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Refreshing_after_a_device_disappeared_moves_audio_to_another_device()
+    {
+        var backend = new FakeAudioBackend();
+        var (window, vm) = Show(new MainWindowViewModel(backend, Store()));
+        vm.Start();
+
+        backend.OutputDevices.RemoveAll(d => d.Id == "speakers");
+        vm.RefreshDevicesCommand.Execute(null);
+
+        Assert.True(vm.IsRunning);
+        Assert.Equal("cable", vm.SelectedOutput?.Id);
+        Assert.Equal("cable", backend.Outputs[^1].DeviceId);
+
+        // Nothing left to play on: stop instead of pretending to run.
+        backend.OutputDevices.Clear();
+        vm.RefreshDevicesCommand.Execute(null);
+        Assert.False(vm.IsRunning);
+        Assert.True(vm.HasError);
+
+        window.Close();
+        vm.Dispose();
+    }
+
+    [AvaloniaFact]
     public void Effects_can_be_added_reordered_toggled_and_removed()
     {
-        var engineChain = new List<string>();
         var (window, vm) = Show(new MainWindowViewModel(new FakeAudioBackend(), Store()));
 
         vm.AddEffectOptions.Single(o => o.Name == "Equalizer").Command.Execute(null);

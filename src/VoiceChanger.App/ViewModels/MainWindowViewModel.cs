@@ -163,7 +163,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void RefreshDevices()
     {
-        LoadDevices(SelectedInput?.Id, SelectedOutput?.Id);
+        var input = SelectedInput;
+        var output = SelectedOutput;
+        LoadDevices(input?.Id, output?.Id);
+
+        // A device that disappeared was replaced by another one: move the running audio over.
+        if (IsRunning && (SelectedInput != input || SelectedOutput != output))
+        {
+            Start();
+        }
     }
 
     [RelayCommand]
@@ -182,6 +190,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ErrorMessage = null;
         if (SelectedInput is null || SelectedOutput is null)
         {
+            if (IsRunning)
+            {
+                Stop();
+            }
+
             ErrorMessage = "Select an input and an output device first.";
             return;
         }
@@ -197,6 +210,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             IsRunning = false;
+            _statusTimer.Stop();
+            InputLevelDb = MeterFloorDb;
+            OutputLevelDb = MeterFloorDb;
+            LatencyText = "–";
             ErrorMessage = $"Could not start audio: {ex.Message}";
             StatusText = "Stopped.";
         }

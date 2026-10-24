@@ -17,8 +17,12 @@ public sealed partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var viewModel = new MainWindowViewModel(AudioBackendFactory.Create(), new SettingsStore(SettingsStore.DefaultPath));
-            desktop.MainWindow = new MainWindow { DataContext = viewModel };
-            desktop.ShutdownRequested += (_, _) => viewModel.Dispose();
+            var window = new MainWindow { DataContext = viewModel };
+
+            // Stop the audio devices and remember the settings however the app ends.
+            window.Closed += (_, _) => viewModel.Dispose();
+            desktop.Exit += (_, _) => viewModel.Dispose();
+            desktop.MainWindow = window;
         }
 
         base.OnFrameworkInitializationCompleted();

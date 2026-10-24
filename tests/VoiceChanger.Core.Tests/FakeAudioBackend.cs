@@ -18,10 +18,14 @@ internal sealed class FakeAudioBackend : IAudioBackend
 
     public bool IsSupported => true;
 
+    public List<AudioDeviceInfo> InputDevices { get; } =
+        [new("mic", "Microphone", AudioDeviceKind.Input, IsDefault: true), new("line", "Line In", AudioDeviceKind.Input)];
+
+    public List<AudioDeviceInfo> OutputDevices { get; } =
+        [new("speakers", "Speakers", AudioDeviceKind.Output, IsDefault: true), new("cable", "Virtual Cable", AudioDeviceKind.Output)];
+
     public IReadOnlyList<AudioDeviceInfo> GetDevices(AudioDeviceKind kind) =>
-        kind == AudioDeviceKind.Input
-            ? [new("mic", "Microphone", kind, IsDefault: true), new("line", "Line In", kind)]
-            : [new("speakers", "Speakers", kind, IsDefault: true), new("cable", "Virtual Cable", kind)];
+        (kind == AudioDeviceKind.Input ? InputDevices : OutputDevices).ToList();
 
     public IAudioInputStream OpenInput(string deviceId, int bufferMilliseconds)
     {
