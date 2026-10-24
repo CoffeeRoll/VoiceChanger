@@ -22,4 +22,9 @@
     <ProjectReference Include="..\..\src\VoiceChanger.App\VoiceChanger.App.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Share the fake audio devices with the core tests. -->
+    <Compile Include="..\VoiceChanger.Core.Tests\FakeAudioBackend.cs" Link="FakeAudioBackend.cs" />
+  </ItemGroup>
+
 </Project>

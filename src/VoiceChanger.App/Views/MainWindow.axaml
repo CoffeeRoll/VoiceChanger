@@ -1,0 +1,285 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:VoiceChanger.App.ViewModels"
+        xmlns:views="using:VoiceChanger.App.Views"
+        xmlns:controls="using:VoiceChanger.App.Controls"
+        xmlns:audio="using:VoiceChanger.Core.Audio"
+        xmlns:fx="using:VoiceChanger.Core.Effects"
+        x:Class="VoiceChanger.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="VoiceChanger"
+        Width="1280"
+        Height="820"
+        MinWidth="1120"
+        MinHeight="640"
+        WindowStartupLocation="CenterScreen"
+        Icon="/Assets/icon.ico"
+        Background="{StaticResource WindowBackgroundBrush}">
+
+  <Window.DataTemplates>
+    <!-- Editors shown inside each effect card. -->
+    <DataTemplate DataType="vm:EqualizerViewModel">
+      <views:EqualizerEditor />
+    </DataTemplate>
+    <DataTemplate DataType="vm:GenericEffectViewModel">
+      <views:GenericEffectEditor />
+    </DataTemplate>
+  </Window.DataTemplates>
+
+  <Grid RowDefinitions="Auto,*,Auto">
+
+    <!-- ============================== Header ============================== -->
+    <Border Grid.Row="0" Padding="24,14" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="12">
+          <Border Width="40" Height="40" CornerRadius="11" Background="{StaticResource AccentGradientBrush}">
+            <Path Data="{StaticResource IconWave}"
+                  Width="24" Height="24"
+                  Stroke="White" StrokeThickness="2.2" StrokeLineCap="Round"
+                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <StackPanel VerticalAlignment="Center" Spacing="1">
+            <TextBlock Classes="h1" Text="VoiceChanger" />
+            <TextBlock Classes="muted" Text="Real-time voice effects" />
+          </StackPanel>
+        </StackPanel>
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+          <!-- Step 4: master switch for every effect. -->
+          <Border Classes="step" ToolTip.Tip="Step 4: turn the effects on or off">
+            <TextBlock Text="4" />
+          </Border>
+          <ToggleSwitch x:Name="EffectsSwitch"
+                        IsChecked="{Binding EffectsEnabled}"
+                        OnContent="Effects on"
+                        OffContent="Effects off (bypass)"
+                        MinWidth="190"
+                        ToolTip.Tip="When off your voice passes through unchanged" />
+          <Button x:Name="StartStopButton"
+                  Classes="primary"
+                  Classes.running="{Binding IsRunning}"
+                  MinWidth="132"
+                  Command="{Binding ToggleRunningCommand}"
+                  IsEnabled="{Binding IsBackendSupported}"
+                  HotKey="Ctrl+Enter"
+                  ToolTip.Tip="Start or stop processing audio (Ctrl+Enter)">
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+              <Path Data="{StaticResource IconPlay}" Fill="White" Width="14" Height="14" Stretch="Uniform"
+                    IsVisible="{Binding !IsRunning}" VerticalAlignment="Center" />
+              <Path Data="{StaticResource IconStop}" Fill="White" Width="12" Height="12" Stretch="Uniform"
+                    IsVisible="{Binding IsRunning}" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding StartStopText}" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- ===================== Signal path: input → effects → output ===================== -->
+    <Grid Grid.Row="1" Margin="24,20,24,16" ColumnDefinitions="280,32,*,32,280">
+
+      <!-- Step 1: input -->
+      <Border Grid.Column="0" Classes="card" VerticalAlignment="Top">
+        <StackPanel Spacing="16">
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <Border Classes="step"><TextBlock Text="1" /></Border>
+            <TextBlock Classes="h2" Text="Input" />
+          </StackPanel>
+
+          <StackPanel Spacing="6">
+            <TextBlock Classes="label" Text="Microphone or source" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+              <ComboBox x:Name="InputDeviceBox"
+                        ItemsSource="{Binding InputDevices}"
+                        SelectedItem="{Binding SelectedInput}"
+                        PlaceholderText="No input devices found"
+                        HorizontalAlignment="Stretch" />
+              <Button Grid.Column="1" Classes="icon" Command="{Binding RefreshDevicesCommand}" ToolTip.Tip="Refresh the device lists">
+                <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+              </Button>
+            </Grid>
+          </StackPanel>
+
+          <StackPanel Spacing="2">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="label" Text="Input gain" />
+              <TextBlock Grid.Column="1" Classes="value" Text="{Binding InputGainDb, StringFormat='{}{0:+0.0;-0.0;0.0} dB'}" />
+            </Grid>
+            <Slider Minimum="-24" Maximum="24" SmallChange="0.5" LargeChange="3" Value="{Binding InputGainDb}" />
+          </StackPanel>
+
+          <StackPanel Spacing="6">
+            <TextBlock Classes="label" Text="Input level" />
+            <controls:LevelMeter Level="{Binding InputLevelDb}" />
+          </StackPanel>
+
+          <CheckBox IsChecked="{Binding MonoProcessing}"
+                    ToolTip.Tip="Voices are mono. Mixing to one channel halves the processing work.">
+            <TextBlock Text="Mix to mono (recommended for voice)" TextWrapping="Wrap" />
+          </CheckBox>
+        </StackPanel>
+      </Border>
+
+      <Path Grid.Column="1" Classes="icon" Data="{StaticResource IconArrowRight}" Stroke="{StaticResource TextMutedBrush}"
+            VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,30,0,0" />
+
+      <!-- Step 2: effects -->
+      <Border Grid.Column="2" Classes="card" Padding="0">
+        <Grid RowDefinitions="Auto,*">
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10" Margin="16,16,16,12">
+            <Border Classes="step"><TextBlock Text="2" /></Border>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+              <TextBlock Classes="h2" Text="Effects" />
+              <TextBlock Classes="label" Text="applied from top to bottom" />
+            </StackPanel>
+            <DropDownButton x:Name="AddEffectButton" Grid.Column="2" ToolTip.Tip="Add another effect to the chain">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Path Classes="icon" Data="{StaticResource IconPlus}" Width="14" Height="14" />
+                <TextBlock Text="Add effect" />
+              </StackPanel>
+              <DropDownButton.Flyout>
+                <MenuFlyout Placement="BottomEdgeAlignedRight" ItemsSource="{Binding AddEffectOptions}">
+                  <MenuFlyout.ItemContainerTheme>
+                    <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}" x:DataType="vm:AddEffectOption">
+                      <Setter Property="Header" Value="{Binding Name}" />
+                      <Setter Property="Command" Value="{Binding Command}" />
+                      <Setter Property="ToolTip.Tip" Value="{Binding Description}" />
+                    </ControlTheme>
+                  </MenuFlyout.ItemContainerTheme>
+                </MenuFlyout>
+              </DropDownButton.Flyout>
+            </DropDownButton>
+          </Grid>
+
+          <ScrollViewer Grid.Row="1" Padding="16,0,16,4" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+              <ItemsControl x:Name="EffectList" ItemsSource="{Binding Effects}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:EffectViewModel">
+                    <Border Classes="effect" Classes.disabled="{Binding !IsEnabled}" Margin="0,0,0,12">
+                      <StackPanel Spacing="12">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                          <ToggleSwitch IsChecked="{Binding IsEnabled}"
+                                        OnContent="{x:Null}"
+                                        OffContent="{x:Null}"
+                                        MinWidth="0"
+                                        VerticalAlignment="Center"
+                                        ToolTip.Tip="Turn this effect on or off" />
+                          <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                              <TextBlock Classes="label" Text="{Binding Position, StringFormat='{}#{0}'}" />
+                              <TextBlock Classes="h2" Text="{Binding Name}" />
+                            </StackPanel>
+                            <TextBlock Classes="muted" Text="{Binding Description}" />
+                          </StackPanel>
+                          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                            <ComboBox ItemsSource="{Binding Presets}"
+                                      SelectedItem="{Binding SelectedPreset}"
+                                      PlaceholderText="Presets"
+                                      IsVisible="{Binding HasPresets}"
+                                      Width="140"
+                                      Margin="0,0,6,0"
+                                      ToolTip.Tip="Load a preset" />
+                            <Button Classes="icon" Command="{Binding ResetParametersCommand}" ToolTip.Tip="Reset all settings of this effect">
+                              <Path Classes="icon" Data="{StaticResource IconReset}" />
+                            </Button>
+                            <Button Classes="icon" Command="{Binding MoveUpCommand}" IsEnabled="{Binding CanMoveUp}" ToolTip.Tip="Move up (process earlier)">
+                              <Path Classes="icon" Data="{StaticResource IconUp}" />
+                            </Button>
+                            <Button Classes="icon" Command="{Binding MoveDownCommand}" IsEnabled="{Binding CanMoveDown}" ToolTip.Tip="Move down (process later)">
+                              <Path Classes="icon" Data="{StaticResource IconDown}" />
+                            </Button>
+                            <Button Classes="icon" Command="{Binding RemoveCommand}" ToolTip.Tip="Remove this effect">
+                              <Path Classes="icon" Data="{StaticResource IconClose}" />
+                            </Button>
+                          </StackPanel>
+                        </Grid>
+                        <ContentControl Content="{Binding}" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <StackPanel IsVisible="{Binding HasNoEffects}" Spacing="6" Margin="0,40" HorizontalAlignment="Center">
+                <TextBlock Classes="h2" Text="No effects yet" HorizontalAlignment="Center" />
+                <TextBlock Classes="muted" Text="Use “Add effect” to add a pitch shifter or an equalizer." HorizontalAlignment="Center" />
+              </StackPanel>
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+
+      <Path Grid.Column="3" Classes="icon" Data="{StaticResource IconArrowRight}" Stroke="{StaticResource TextMutedBrush}"
+            VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,30,0,0" />
+
+      <!-- Step 3: output -->
+      <Border Grid.Column="4" Classes="card" VerticalAlignment="Top">
+        <StackPanel Spacing="16">
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <Border Classes="step"><TextBlock Text="3" /></Border>
+            <TextBlock Classes="h2" Text="Output" />
+          </StackPanel>
+
+          <StackPanel Spacing="6">
+            <TextBlock Classes="label" Text="Speakers, headphones or virtual cable" />
+            <ComboBox x:Name="OutputDeviceBox"
+                      ItemsSource="{Binding OutputDevices}"
+                      SelectedItem="{Binding SelectedOutput}"
+                      PlaceholderText="No output devices found"
+                      HorizontalAlignment="Stretch" />
+          </StackPanel>
+
+          <StackPanel Spacing="2">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="label" Text="Volume" />
+              <TextBlock Grid.Column="1" Classes="value" Text="{Binding OutputGainDb, StringFormat='{}{0:+0.0;-0.0;0.0} dB'}" />
+            </Grid>
+            <Slider Minimum="-40" Maximum="12" SmallChange="0.5" LargeChange="3" Value="{Binding OutputGainDb}" />
+          </StackPanel>
+
+          <StackPanel Spacing="6">
+            <TextBlock Classes="label" Text="Output level" />
+            <controls:LevelMeter Level="{Binding OutputLevelDb}" />
+          </StackPanel>
+
+          <StackPanel Spacing="6">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="label" Text="Latency" />
+              <TextBlock Grid.Column="1" Classes="value" Text="{Binding LatencyText}" ToolTip.Tip="Estimated delay from microphone to output" />
+            </Grid>
+            <ComboBox ItemsSource="{Binding LatencyOptions}"
+                      SelectedItem="{Binding SelectedLatency}"
+                      HorizontalAlignment="Stretch" />
+            <TextBlock Classes="muted" Text="{Binding SelectedLatency.Description}" />
+          </StackPanel>
+
+          <Border Background="{StaticResource CardRaisedBrush}" CornerRadius="8" Padding="10,8">
+            <TextBlock Classes="muted"
+                       Text="Tip: wear headphones to avoid feedback. To use your changed voice in Discord, games or OBS, pick a virtual audio cable (for example VB-CABLE) here and select it as the microphone in that app." />
+          </Border>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <!-- ============================== Status bar ============================== -->
+    <Border Grid.Row="2" Padding="24,10" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,1,0,0">
+      <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+        <Ellipse Width="8" Height="8" Fill="{StaticResource SuccessBrush}" IsVisible="{Binding IsRunning}" VerticalAlignment="Center" />
+        <Ellipse Width="8" Height="8" Fill="{StaticResource TextMutedBrush}" IsVisible="{Binding !IsRunning}" VerticalAlignment="Center" />
+        <StackPanel Grid.Column="1" Spacing="6">
+          <TextBlock x:Name="StatusLine" Classes="label" Text="{Binding StatusText}" TextTrimming="CharacterEllipsis" />
+          <Border IsVisible="{Binding HasError}" Background="#33EB5757" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" CornerRadius="6" Padding="10,6">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <TextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap" Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center" />
+              <Button Grid.Column="1" Classes="icon" Command="{Binding DismissErrorCommand}" ToolTip.Tip="Dismiss">
+                <Path Classes="icon" Data="{StaticResource IconClose}" />
+              </Button>
+            </Grid>
+          </Border>
+        </StackPanel>
+        <TextBlock Grid.Column="2" Classes="label" Text="{Binding BackendName}" />
+      </Grid>
+    </Border>
+  </Grid>
+</Window>
