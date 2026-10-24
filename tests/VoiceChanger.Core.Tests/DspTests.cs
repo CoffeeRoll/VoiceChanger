@@ -284,3 +284,47 @@ public class ChannelMapperTests
         Assert.Equal([1f, 2, 0, 0, 3, 4, 0, 0], quad);
     }
 }
+
+public class SampleConverterTests
+{
+    [Fact]
+    public void Converts_pcm16()
+    {
+        byte[] bytes = [0x00, 0x40, 0x00, 0xC0, 0xFF, 0x7F, 0x00, 0x80];
+        var result = new float[4];
+        Assert.Equal(4, Audio.SampleConverter.ToFloat(bytes, Audio.SampleEncoding.Pcm16, result));
+        Assert.Equal([0.5f, -0.5f, 32767 / 32768f, -1f], result);
+    }
+
+    [Fact]
+    public void Converts_pcm24_with_sign_extension()
+    {
+        byte[] bytes = [0x00, 0x00, 0x40, 0x00, 0x00, 0xC0, 0x01, 0x00, 0x00];
+        var result = new float[3];
+        Assert.Equal(3, Audio.SampleConverter.ToFloat(bytes, Audio.SampleEncoding.Pcm24, result));
+        Assert.Equal(0.5f, result[0]);
+        Assert.Equal(-0.5f, result[1]);
+        Assert.Equal(1f / 8388608f, result[2], 9);
+    }
+
+    [Fact]
+    public void Converts_pcm32_and_float()
+    {
+        var pcm = BitConverter.GetBytes(int.MinValue / 4).Concat(BitConverter.GetBytes(int.MaxValue)).ToArray();
+        var result = new float[2];
+        Audio.SampleConverter.ToFloat(pcm, Audio.SampleEncoding.Pcm32, result);
+        Assert.Equal(-0.25f, result[0]);
+        Assert.Equal(1f, result[1], 6);
+
+        var floats = BitConverter.GetBytes(0.125f).Concat(BitConverter.GetBytes(-0.75f)).ToArray();
+        Audio.SampleConverter.ToFloat(floats, Audio.SampleEncoding.Float32, result);
+        Assert.Equal([0.125f, -0.75f], result);
+    }
+
+    [Fact]
+    public void Ignores_partial_samples()
+    {
+        var result = new float[4];
+        Assert.Equal(1, Audio.SampleConverter.ToFloat(new byte[5], Audio.SampleEncoding.Pcm24, result));
+    }
+}

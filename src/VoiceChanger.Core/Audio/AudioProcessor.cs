@@ -137,6 +137,11 @@ public sealed class AudioProcessor
     {
         int inputChannels = _input.Channels;
         int frames = interleaved.Length / inputChannels;
+        if (frames == 0)
+        {
+            return;
+        }
+
         _resampler.StepAdjustment = StepAdjustment;
         float gain = InputGain;
         int queued = 0;
