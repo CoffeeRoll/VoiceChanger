@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>VoiceChanger.Core</RootNamespace>
+    <Description>Platform independent real-time DSP, effects and audio engine for VoiceChanger.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="VoiceChanger.Core.Tests" />
+  </ItemGroup>
+
+</Project>

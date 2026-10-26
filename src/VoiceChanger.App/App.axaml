@@ -1,0 +1,171 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VoiceChanger.App.App"
+             RequestedThemeVariant="Dark">
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <!-- Palette -->
+      <Color x:Key="WindowBackgroundColor">#0F1115</Color>
+      <Color x:Key="CardColor">#171A21</Color>
+      <Color x:Key="CardRaisedColor">#1E222B</Color>
+      <Color x:Key="CardBorderColor">#2A2F3A</Color>
+      <Color x:Key="TextPrimaryColor">#E8EAF0</Color>
+      <Color x:Key="TextMutedColor">#8A93A6</Color>
+      <Color x:Key="AccentColor">#7C5CFF</Color>
+      <Color x:Key="AccentSecondColor">#22D3EE</Color>
+      <Color x:Key="SuccessColor">#3BD671</Color>
+      <Color x:Key="DangerColor">#EB5757</Color>
+
+      <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource WindowBackgroundColor}" />
+      <SolidColorBrush x:Key="CardBrush" Color="{StaticResource CardColor}" />
+      <SolidColorBrush x:Key="CardRaisedBrush" Color="{StaticResource CardRaisedColor}" />
+      <SolidColorBrush x:Key="CardBorderBrush" Color="{StaticResource CardBorderColor}" />
+      <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}" />
+      <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+      <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
+      <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}" />
+      <!-- Line icons on a 16x16 grid (drawn with a stroke). -->
+      <StreamGeometry x:Key="IconClose">M4,4 L12,12 M12,4 L4,12</StreamGeometry>
+      <StreamGeometry x:Key="IconUp">M8,13 L8,3 M4,7 L8,3 L12,7</StreamGeometry>
+      <StreamGeometry x:Key="IconDown">M8,3 L8,13 M4,9 L8,13 L12,9</StreamGeometry>
+      <StreamGeometry x:Key="IconReset">M3.5,8 A4.5,4.5 0 1 0 5.2,4.5 M5.2,1.5 L5.2,4.6 L8.3,4.6</StreamGeometry>
+      <StreamGeometry x:Key="IconRefresh">M12.5,8 A4.5,4.5 0 1 1 10.8,4.5 M10.8,1.5 L10.8,4.6 L7.7,4.6</StreamGeometry>
+      <StreamGeometry x:Key="IconPlus">M8,3 L8,13 M3,8 L13,8</StreamGeometry>
+      <StreamGeometry x:Key="IconArrowRight">M2,8 L14,8 M9.5,3.5 L14,8 L9.5,12.5</StreamGeometry>
+      <StreamGeometry x:Key="IconWave">M3,10 L3,14 M7,7 L7,17 M11,3 L11,21 M15,6 L15,18 M19,10 L19,14</StreamGeometry>
+      <!-- Filled icons. -->
+      <StreamGeometry x:Key="IconPlay">M4.5,2.5 L13.5,8 L4.5,13.5 Z</StreamGeometry>
+      <StreamGeometry x:Key="IconStop">M3.5,3.5 L12.5,3.5 L12.5,12.5 L3.5,12.5 Z</StreamGeometry>
+
+      <LinearGradientBrush x:Key="AccentGradientBrush" StartPoint="0%,0%" EndPoint="100%,100%">
+        <GradientStop Offset="0" Color="{StaticResource AccentColor}" />
+        <GradientStop Offset="1" Color="{StaticResource AccentSecondColor}" />
+      </LinearGradientBrush>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Dark"
+                               Accent="#FF7C5CFF"
+                               RegionColor="#FF0F1115"
+                               AltHigh="#FF0F1115"
+                               BaseHigh="#FFE8EAF0" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+
+    <!-- Cards that group each step of the signal path. -->
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{StaticResource CardBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="16" />
+    </Style>
+    <Style Selector="Border.effect">
+      <Setter Property="Background" Value="{StaticResource CardRaisedBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="14,12" />
+    </Style>
+    <Style Selector="Border.effect.disabled">
+      <Setter Property="Opacity" Value="0.55" />
+    </Style>
+
+    <!-- Numbered step badges: 1 input, 2 effects, 3 output, 4 on/off. -->
+    <Style Selector="Border.step">
+      <Setter Property="Width" Value="22" />
+      <Setter Property="Height" Value="22" />
+      <Setter Property="CornerRadius" Value="11" />
+      <Setter Property="Background" Value="{StaticResource AccentGradientBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.step > TextBlock">
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <Style Selector="TextBlock.h1">
+      <Setter Property="FontSize" Value="20" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.h2">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.label">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.value">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="FontFeatures" Value="+tnum" />
+    </Style>
+    <Style Selector=":disabled > Grid > TextBlock.label, :disabled > Grid > TextBlock.value">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <!-- Small square icon buttons used in effect headers. -->
+    <Style Selector="Button.icon">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="FontSize" Value="14" />
+    </Style>
+
+    <Style Selector="Path.icon">
+      <Setter Property="Width" Value="16" />
+      <Setter Property="Height" Value="16" />
+      <Setter Property="Stroke" Value="{StaticResource TextPrimaryBrush}" />
+      <Setter Property="StrokeThickness" Value="1.6" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="StrokeJoin" Value="Round" />
+    </Style>
+    <Style Selector="Button.icon:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button:disabled Path.icon">
+      <Setter Property="Opacity" Value="0.35" />
+    </Style>
+
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="{StaticResource AccentGradientBrush}" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Padding" Value="20,9" />
+      <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource AccentGradientBrush}" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Opacity" Value="0.9" />
+    </Style>
+    <Style Selector="Button.primary.running">
+      <Setter Property="Background" Value="{StaticResource DangerBrush}" />
+    </Style>
+    <Style Selector="Button.primary.running:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource DangerBrush}" />
+    </Style>
+  </Application.Styles>
+</Application>

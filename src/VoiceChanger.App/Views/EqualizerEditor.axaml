@@ -1,0 +1,57 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:VoiceChanger.App.ViewModels"
+             xmlns:views="using:VoiceChanger.App.Views"
+             xmlns:controls="using:VoiceChanger.App.Controls"
+             x:Class="VoiceChanger.App.Views.EqualizerEditor"
+             x:DataType="vm:EqualizerViewModel">
+  <StackPanel Spacing="14">
+    <controls:FrequencyResponseView Height="130"
+                                    Frequencies="{Binding ResponseFrequencies}"
+                                    Response="{Binding Response}" />
+
+    <!-- Graphic bands: drag up to boost, down to cut. Double-click a slider to reset it. -->
+    <ItemsControl ItemsSource="{Binding Bands}">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <UniformGrid Rows="1" />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:ParameterViewModel">
+          <StackPanel Spacing="4" HorizontalAlignment="Center">
+            <TextBlock Classes="value"
+                       FontSize="10"
+                       HorizontalAlignment="Center"
+                       Text="{Binding DisplayValue}" />
+            <Slider Orientation="Vertical"
+                    Height="140"
+                    HorizontalAlignment="Center"
+                    Minimum="0"
+                    Maximum="1"
+                    SmallChange="0.02"
+                    LargeChange="0.125"
+                    Value="{Binding Position}"
+                    ToolTip.Tip="Double-click to reset" />
+            <TextBlock Classes="label"
+                       HorizontalAlignment="Center"
+                       Text="{Binding Name}" />
+          </StackPanel>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <ItemsControl ItemsSource="{Binding Filters}" Margin="-12,0">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <UniformGrid Columns="2" />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:ParameterViewModel">
+          <views:ParameterEditor Margin="12,0,12,6" />
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

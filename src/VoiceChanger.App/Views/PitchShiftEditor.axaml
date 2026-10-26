@@ -1,0 +1,65 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:VoiceChanger.App.ViewModels"
+             xmlns:views="using:VoiceChanger.App.Views"
+             x:Class="VoiceChanger.App.Views.PitchShiftEditor"
+             x:DataType="vm:PitchShiftViewModel">
+
+  <UserControl.Styles>
+    <!-- Segmented octave buttons; the current octave is filled. -->
+    <Style Selector="Button.segment">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Margin" Value="2,0" />
+      <Setter Property="Padding" Value="0,6" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Background" Value="#262B36" />
+    </Style>
+    <Style Selector="Button.segment.selected">
+      <Setter Property="Background" Value="{StaticResource AccentGradientBrush}" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.segment.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource AccentGradientBrush}" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel Spacing="10">
+    <!-- Quick octave selection: sets the pitch to whole octaves. -->
+    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+      <TextBlock Classes="label" Text="Octave" MinWidth="48" />
+      <ItemsControl x:Name="OctaveButtons" Grid.Column="1" ItemsSource="{Binding Octaves}" Margin="-2,0">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <UniformGrid Rows="1" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:OctaveOptionViewModel">
+            <Button Classes="segment"
+                    Classes.selected="{Binding IsSelected}"
+                    Content="{Binding Label}"
+                    Command="{Binding SelectCommand}"
+                    ToolTip.Tip="{Binding Description}" />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </Grid>
+
+    <!-- Every setting, two per row. -->
+    <ItemsControl ItemsSource="{Binding Parameters}" Margin="-12,0">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <UniformGrid Columns="2" />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:ParameterViewModel">
+          <views:ParameterEditor Margin="12,0,12,6" />
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

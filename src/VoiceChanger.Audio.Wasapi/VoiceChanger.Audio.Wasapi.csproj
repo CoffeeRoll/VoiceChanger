@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>VoiceChanger.Audio.Wasapi</RootNamespace>
+    <Description>Windows Audio Session API (WASAPI) backend for VoiceChanger, built on NAudio.</Description>
+    <!-- Needed by the LibraryImport source generator for the MMCSS call. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio.Wasapi" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VoiceChanger.Core\VoiceChanger.Core.csproj" />
+  </ItemGroup>
+
+</Project>
