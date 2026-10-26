@@ -230,6 +230,39 @@ public sealed class MainWindowTests : IDisposable
         // Presets light up the matching octave.
         pitch.SelectedPreset = pitch.Presets.Single(p => p.Name == "Monster");
         Assert.Equal([-1], pitch.Octaves.Where(o => o.IsSelected).Select(o => o.Octaves));
+        pitch.SelectedPreset = pitch.Presets.Single(p => p.Name == "Natural octave up");
+        Assert.Equal([1], pitch.Octaves.Where(o => o.IsSelected).Select(o => o.Octaves));
+
+        window.Close();
+        vm.Dispose();
+    }
+
+    [AvaloniaFact]
+    public void Formant_controls_grey_out_what_does_not_apply()
+    {
+        var (window, vm) = Show(new MainWindowViewModel(new FakeAudioBackend(), Store()));
+        var pitch = vm.Effects.OfType<PitchShiftViewModel>().Single();
+        var formants = pitch.Parameters.Single(p => p.Parameter.Id == "formants");
+        var formantShift = pitch.Parameters.Single(p => p.Parameter.Id == "formantShift");
+        var algorithm = pitch.Parameters.Single(p => p.Parameter.Id == "mode");
+
+        ParameterEditor EditorFor(ParameterViewModel parameter) =>
+            window.GetVisualDescendants().OfType<ParameterEditor>().Single(e => e.DataContext == parameter);
+
+        Assert.True(formants.IsToggle);
+        Assert.False(formantShift.IsAvailable);
+        Assert.True(algorithm.IsAvailable);
+
+        formants.IsOn = true;
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(formantShift.IsAvailable);
+        Assert.False(algorithm.IsAvailable);
+        Assert.False(EditorFor(algorithm).GetVisualDescendants().OfType<ComboBox>().Single().IsEffectivelyEnabled);
+        Assert.True(EditorFor(formantShift).GetVisualDescendants().OfType<Slider>().Single().IsEffectivelyEnabled);
+
+        formants.IsOn = false;
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(EditorFor(formantShift).GetVisualDescendants().OfType<Slider>().Single().IsEffectivelyEnabled);
 
         window.Close();
         vm.Dispose();

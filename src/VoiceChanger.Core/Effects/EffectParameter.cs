@@ -32,6 +32,7 @@ public enum ParameterScale
 public sealed class EffectParameter
 {
     private readonly Func<float, string>? _formatter;
+    private Func<bool>? _availableWhen;
     private float _value;
 
     private EffectParameter(
@@ -120,6 +121,12 @@ public sealed class EffectParameter
 
     public bool IsDefault => Value.Equals(DefaultValue);
 
+    /// <summary>
+    /// Whether the parameter currently has any effect. Some settings only matter while another one is
+    /// switched on; the UI greys them out otherwise.
+    /// </summary>
+    public bool IsAvailable => _availableWhen?.Invoke() ?? true;
+
     /// <summary>Raised on the thread that changed the value.</summary>
     public event EventHandler? ValueChanged;
 
@@ -167,6 +174,13 @@ public sealed class EffectParameter
         new(id, name, ParameterKind.Toggle, 0, 1, defaultValue ? 1 : 0, null, 0, ParameterScale.Linear, null, null, description);
 
     public void Reset() => Value = DefaultValue;
+
+    /// <summary>Marks the parameter as only relevant while <paramref name="condition"/> holds.</summary>
+    public EffectParameter AvailableWhen(Func<bool> condition)
+    {
+        _availableWhen = condition ?? throw new ArgumentNullException(nameof(condition));
+        return this;
+    }
 
     /// <summary>Clamps and rounds a value to what this parameter can hold.</summary>
     public float Coerce(float value)

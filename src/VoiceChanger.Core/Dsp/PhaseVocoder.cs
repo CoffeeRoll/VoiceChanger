@@ -11,11 +11,34 @@ namespace VoiceChanger.Core.Dsp;
 /// The stretched signal is then resampled by <c>Ha / Hs</c>, bringing the duration back and moving
 /// every frequency by exactly the ratio. Weighted overlap-add keeps the level constant for any ratio.
 /// </para>
+/// <para>
+/// Resampling moves the spectral envelope (the formants that give a voice its character) together
+/// with the pitch, which is what makes a voice an octave up sound like a chipmunk. With
+/// <see cref="PreserveFormants"/> each frame's envelope is estimated by cepstral smoothing and the
+/// magnitudes are re-weighted before resampling so that, afterwards, the envelope is back where it
+/// was (or moved by <see cref="FormantRatio"/>), while the harmonics carry the new pitch. The envelope
+/// is a "true envelope" (A. Röbel and X. Rodet, 2005): cepstral smoothing repeated until the curve
+/// rests on the harmonic peaks rather than averaging them with the valleys between them, computed
+/// on a peak-held, decimated copy of the spectrum to keep it cheap.
+/// </para>
 /// </summary>
 public sealed class PhaseVocoder
 {
     private const int Oversampling = 8;
     private const int QueueMargin = 32;
+
+    // Envelope smoothing keeps quefrencies below ~1.2 ms: enough detail for formants while ignoring
+    // the harmonic ripple of voices up to roughly 800 Hz.
+    private const double LifterSeconds = 0.0012;
+    private const double EnvelopeBinHz = 90;
+    // A few true-envelope iterations are enough (and, measured on synthetic vowels, more accurate
+    // than full convergence, which over-fits the peaks). Formants move slowly, so the envelope is
+    // refreshed every other frame.
+    private const int EnvelopeIterations = 4;
+    private const int EnvelopeInterval = 2;
+    private const float EnvelopeTolerance = 0.23f; // natural log units, about 2 dB
+    private const float MaxBoost = 8f;        // +18 dB
+    private const float MaxCut = 1f / 64;     // −36 dB
 
     private readonly int _size;
     private readonly int _half;
@@ -37,10 +60,20 @@ public sealed class PhaseVocoder
     private readonly float[] _stretched;
     private readonly float[] _resampled;
     private readonly float[] _queue;
+    private readonly Fft _envelopeFft;
+    private readonly int _decimation;
+    private readonly float[] _coarseLog;
+    private readonly float[] _coarseFit;
+    private readonly float[] _cepstrumRe;
+    private readonly float[] _cepstrumIm;
+    private readonly float[] _envelope;
+    private readonly float[] _correction;
+    private readonly int _lifter;
 
     private Resampler _resampler;
     private int _synthesisHop;
     private int _rover;
+    private int _envelopeCountdown;
     private int _queueStart;
     private int _queueCount;
     private double _ratio = 1;
@@ -79,6 +112,22 @@ public sealed class PhaseVocoder
         _resampled = new float[frameSize * 4];
         _queue = new float[frameSize * 4];
 
+        // The envelope is estimated on bins of roughly EnvelopeBinHz (a power-of-two decimation).
+        double binHz = (double)sampleRate / frameSize;
+        _decimation = (int)System.Numerics.BitOperations.RoundUpToPowerOf2((uint)Math.Max(1, (int)Math.Round(EnvelopeBinHz / binHz)));
+        _decimation = Math.Min(_decimation, _half / 32);
+        int coarseBins = _half / _decimation;
+        _envelopeFft = new Fft(coarseBins * 2);
+        _coarseLog = new float[coarseBins + 1];
+        _coarseFit = new float[coarseBins + 1];
+        _cepstrumRe = new float[coarseBins * 2];
+        _cepstrumIm = new float[coarseBins * 2];
+        _envelope = new float[_half + 1];
+        _correction = new float[_half + 1];
+        // Decimating the spectrum shortens the cepstrum but keeps its time scale (1 / sampleRate per
+        // quefrency step), so the cut-off in steps is the same as for the full spectrum.
+        _lifter = Math.Clamp((int)Math.Round(LifterSeconds * sampleRate), 4, coarseBins / 2);
+
         _synthesisHop = _hop;
         _resampler = new Resampler(_hop, _hop, 1);
         Reset();
@@ -92,6 +141,15 @@ public sealed class PhaseVocoder
         get => _ratio;
         set => _ratio = Math.Clamp(value, 0.25, 4.0);
     }
+
+    /// <summary>Keep the spectral envelope (formants) in place instead of shifting it with the pitch.</summary>
+    public bool PreserveFormants { get; set; }
+
+    /// <summary>
+    /// With <see cref="PreserveFormants"/>: how far to move the formants, as a frequency ratio
+    /// (1 = keep them where they are, above 1 = smaller/brighter voice, below 1 = bigger/darker voice).
+    /// </summary>
+    public double FormantRatio { get; set; } = 1;
 
     public int LatencyFrames => LatencyFor(_size);
 
@@ -107,6 +165,7 @@ public sealed class PhaseVocoder
         Array.Clear(_weightSum);
         _resampler.Reset();
         _rover = _latency;
+        _envelopeCountdown = 0;
 
         // Prime the output queue with the samples played before the first frame is ready.
         Array.Clear(_queue);
@@ -176,7 +235,9 @@ public sealed class PhaseVocoder
 
         _fft.Forward(_real, _imag);
         Analyse();
-        Synthesise(FindPeaks());
+        int peaks = FindPeaks();
+        UpdateFormantCorrection();
+        Synthesise(peaks);
         OverlapAdd();
 
         int produced = _resampler.Process(_stretched.AsSpan(0, _synthesisHop), _resampled);
@@ -252,8 +313,9 @@ public sealed class PhaseVocoder
         for (int k = 0; k <= _half; k++)
         {
             double phase = _synthesisPhase[k];
-            _real[k] = (float)(_magnitude[k] * Math.Cos(phase));
-            _imag[k] = (float)(_magnitude[k] * Math.Sin(phase));
+            double magnitude = _magnitude[k] * _correction[k];
+            _real[k] = (float)(magnitude * Math.Cos(phase));
+            _imag[k] = (float)(magnitude * Math.Sin(phase));
         }
 
         // Mirror into a Hermitian spectrum so the inverse transform is real.
@@ -290,6 +352,136 @@ public sealed class PhaseVocoder
         Array.Copy(_weightSum, hop, _weightSum, 0, remaining);
         Array.Clear(_signalSum, remaining, hop);
         Array.Clear(_weightSum, remaining, hop);
+    }
+
+    /// <summary>
+    /// Per-bin gain that turns the frame's envelope E(f) into E(f · ratio / formantRatio). After the
+    /// final resampling scales every frequency by the ratio, the envelope ends up at E(f / formantRatio).
+    /// </summary>
+    private void UpdateFormantCorrection()
+    {
+        if (!PreserveFormants)
+        {
+            Array.Fill(_correction, 1f);
+            return;
+        }
+
+        if (_envelopeCountdown-- <= 0)
+        {
+            _envelopeCountdown = EnvelopeInterval - 1;
+            EstimateEnvelope();
+        }
+
+        // The pitch ratio actually realised is the ratio of the hops.
+        double warp = (double)_synthesisHop / _hop / FormantRatio;
+        for (int k = 0; k <= _half; k++)
+        {
+            double source = Math.Min(k * warp, _half);
+            int index = (int)source;
+            float t = (float)(source - index);
+            float target = index >= _half ? _envelope[_half] : _envelope[index] + t * (_envelope[index + 1] - _envelope[index]);
+            float gain = target / Math.Max(_envelope[k], 1e-12f);
+            _correction[k] = Math.Clamp(gain, MaxCut, MaxBoost);
+        }
+    }
+
+    /// <summary>
+    /// "True envelope" of the frame: the log spectrum is peak-held onto coarse bins, then smoothed
+    /// cepstrally again and again, each time lifting the data to the smoothed curve wherever it lies
+    /// below it, until the curve passes (within ~2 dB) over every peak.
+    /// </summary>
+    private void EstimateEnvelope()
+    {
+        float loudest = 0;
+        for (int k = 0; k <= _half; k++)
+        {
+            loudest = Math.Max(loudest, _magnitude[k]);
+        }
+
+        float floor = MathF.Log(Math.Max(loudest * 1e-5f, 1e-12f));
+        int coarseBins = _coarseLog.Length - 1;
+        for (int c = 0; c <= coarseBins; c++)
+        {
+            int start = Math.Max(0, c * _decimation - _decimation / 2);
+            int end = Math.Min(_half, c * _decimation + _decimation / 2);
+            float peak = 0;
+            for (int k = start; k <= end; k++)
+            {
+                peak = Math.Max(peak, _magnitude[k]);
+            }
+
+            _coarseLog[c] = Math.Max(MathF.Log(Math.Max(peak, 1e-12f)), floor);
+            _coarseFit[c] = _coarseLog[c];
+        }
+
+        for (int iteration = 0; iteration < EnvelopeIterations; iteration++)
+        {
+            SmoothCepstrally(_coarseFit);
+
+            float worst = 0;
+            for (int c = 0; c <= coarseBins; c++)
+            {
+                float above = _coarseLog[c] - _coarseFit[c];
+                if (above > 0)
+                {
+                    worst = Math.Max(worst, above);
+                    _coarseFit[c] = _coarseLog[c];
+                }
+            }
+
+            if (worst < EnvelopeTolerance)
+            {
+                break;
+            }
+        }
+
+        // Back to full resolution, interpolating between coarse bin centres.
+        for (int k = 0; k <= _half; k++)
+        {
+            float position = (float)k / _decimation;
+            int index = Math.Min((int)position, coarseBins - 1);
+            float t = position - index;
+            _envelope[k] = MathF.Exp(_coarseFit[index] + t * (_coarseFit[index + 1] - _coarseFit[index]));
+        }
+    }
+
+    /// <summary>Replaces a half spectrum (log magnitudes) by its low-quefrency part.</summary>
+    private void SmoothCepstrally(float[] values)
+    {
+        int bins = values.Length - 1;
+        int size = bins * 2;
+        for (int c = 0; c <= bins; c++)
+        {
+            _cepstrumRe[c] = values[c];
+            if (c > 0 && c < bins)
+            {
+                _cepstrumRe[size - c] = values[c];
+            }
+        }
+
+        Array.Clear(_cepstrumIm);
+        _envelopeFft.Forward(_cepstrumRe, _cepstrumIm);
+
+        // Keep low quefrencies only, with a short raised-cosine taper to avoid ringing.
+        int taper = Math.Max(2, _lifter / 4);
+        for (int n = 0; n < size; n++)
+        {
+            int quefrency = Math.Min(n, size - n);
+            float weight = quefrency <= _lifter - taper
+                ? 1f
+                : quefrency >= _lifter
+                    ? 0f
+                    : 0.5f + 0.5f * MathF.Cos(MathF.PI * (quefrency - (_lifter - taper)) / taper);
+            _cepstrumRe[n] *= weight;
+            _cepstrumIm[n] *= weight;
+        }
+
+        _envelopeFft.Inverse(_cepstrumRe, _cepstrumIm);
+        float scale = 1f / size;
+        for (int c = 0; c <= bins; c++)
+        {
+            values[c] = _cepstrumRe[c] * scale;
+        }
     }
 
     private static double Wrap(double phase) => Math.IEEERemainder(phase, 2 * Math.PI);

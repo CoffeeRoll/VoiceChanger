@@ -124,6 +124,11 @@ public abstract partial class EffectViewModel : ObservableObject
 
     protected virtual void OnParameterChanged(object? sender, EventArgs e)
     {
+        foreach (var parameter in Parameters)
+        {
+            parameter.RefreshAvailability();
+        }
+
         if (!_applyingPreset)
         {
             // A partial preset (e.g. an auto-tune style) still applies after changing other settings.

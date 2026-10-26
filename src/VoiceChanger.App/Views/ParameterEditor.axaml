@@ -4,7 +4,11 @@
              x:Class="VoiceChanger.App.Views.ParameterEditor"
              x:DataType="vm:ParameterViewModel">
   <!-- One effect setting: a slider, a list of choices or an on/off switch. -->
-  <StackPanel Spacing="2" Background="Transparent" ToolTip.Tip="{Binding Description}">
+  <StackPanel Spacing="2"
+              Background="Transparent"
+              IsEnabled="{Binding IsAvailable}"
+              ToolTip.Tip="{Binding Description}"
+              ToolTip.ShowOnDisabled="True">
     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
       <TextBlock Classes="label" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
       <TextBlock Grid.Column="1"

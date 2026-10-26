@@ -114,6 +114,9 @@
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="FontFeatures" Value="+tnum" />
     </Style>
+    <Style Selector=":disabled > Grid > TextBlock.label, :disabled > Grid > TextBlock.value">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
     <Style Selector="TextBlock.muted">
       <Setter Property="FontSize" Value="12" />
       <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />

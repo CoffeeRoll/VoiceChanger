@@ -27,7 +27,16 @@ pick an output, and hear the result live with low delay.
   - *High quality (phase vocoder)*: a phase-locked phase vocoder followed by resampling. It sounds
     smoother for large shifts and adds more delay.
 
-  Presets: Higher voice, Lower voice, Chipmunk, Deep, Monster, Harmony, Detune.
+  **Preserve formants** keeps the character of your voice when you shift it, so an octave up sounds
+  like you singing higher rather than a chipmunk, and an octave down sounds like you rather than a
+  monster. It works by estimating the spectral envelope (the formants) of every frame and putting it
+  back where it was after the harmonics have moved. With it on, **Formant shift** moves the formants
+  on their own: negative values sound like a bigger person, positive values like a smaller one,
+  without changing the pitch. Formant preservation always uses the high quality algorithm, so it adds
+  about 20 ms more delay than the low latency one.
+
+  Presets: Higher voice, Lower voice, Chipmunk, Deep, Monster, Harmony, Detune, Natural octave up,
+  Natural octave down, Bigger voice, Smaller voice.
 - **Auto Tune:** detects the pitch of your voice and pulls it to the nearest note of a key and scale.
   See [Auto Tune](#auto-tune) below.
 - Input and output **level meters**, input gain and output volume.
@@ -151,7 +160,7 @@ work on Windows. On other systems the window opens, but the device lists are emp
 | `src/VoiceChanger.Core` | Platform-independent DSP and engine: biquad filters, FFT, resampler, ring buffer, the effects, the effect chain, the audio processor/engine and the settings. |
 | `src/VoiceChanger.Audio.Wasapi` | Windows audio backend built on [NAudio](https://github.com/naudio/NAudio) (WASAPI). |
 | `src/VoiceChanger.App` | The desktop app, built with [Avalonia UI](https://avaloniaui.net/) and CommunityToolkit.Mvvm. |
-| `tests/VoiceChanger.Core.Tests` | Checks the DSP output: filter responses, pitch shifting and pitch detection accuracy, auto-tune correction, resampling, drift compensation with simulated device clocks, and settings. |
+| `tests/VoiceChanger.Core.Tests` | Checks the DSP output: filter responses, pitch shifting and pitch detection accuracy, formant preservation on synthetic vowels, auto-tune correction, resampling, drift compensation with simulated device clocks, and settings. |
 | `tests/VoiceChanger.App.Tests` | Headless UI tests that load the real window with fake audio devices and render screenshots. |
 
 ### Adding an effect

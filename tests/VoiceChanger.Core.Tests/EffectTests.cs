@@ -250,6 +250,8 @@ public class PitchShiftTests
                 effect.Cents.Value = random.Next(-100, 101);
                 effect.WindowMilliseconds.Value = random.Next(10, 101);
                 effect.Mode.Value = random.Next(0, 2);
+                effect.PreserveFormants.Value = random.Next(0, 2);
+                effect.FormantShift.Value = random.Next(-12, 13);
             }
 
             effect.Process(block);

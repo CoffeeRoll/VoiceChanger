@@ -66,8 +66,14 @@ public sealed partial class ParameterViewModel : ObservableObject
 
     public string DisplayValue => Parameter.FormattedValue;
 
+    /// <summary>False while the setting has no effect (it depends on another one); shown greyed out.</summary>
+    public bool IsAvailable => Parameter.IsAvailable;
+
     /// <summary>Raised on the UI thread after the value changed.</summary>
     public event EventHandler? Changed;
+
+    /// <summary>Re-evaluates <see cref="IsAvailable"/> after another parameter of the effect changed.</summary>
+    public void RefreshAvailability() => OnPropertyChanged(nameof(IsAvailable));
 
     [RelayCommand]
     private void Reset() => Parameter.Reset();
