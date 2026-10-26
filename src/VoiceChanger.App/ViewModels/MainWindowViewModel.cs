@@ -115,6 +115,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public bool HasNoEffects => Effects.Count == 0;
 
+    public bool HasEffects => Effects.Count > 0;
+
+    /// <summary>"Collapse all" while any card is open, otherwise "Expand all".</summary>
+    public string CollapseAllText => Effects.Any(e => !e.IsCollapsed) ? "Collapse all" : "Expand all";
+
     /// <summary>Master switch: bypasses every effect when off.</summary>
     [ObservableProperty]
     public partial bool EffectsEnabled { get; set; }
@@ -185,6 +190,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void DismissError() => ErrorMessage = null;
 
+    /// <summary>Collapses every effect card, or expands them all when they are all collapsed already.</summary>
+    [RelayCommand]
+    private void ToggleCollapseAll()
+    {
+        bool collapse = Effects.Any(e => !e.IsCollapsed);
+        foreach (var effect in Effects)
+        {
+            effect.IsCollapsed = collapse;
+        }
+    }
+
     public void Start()
     {
         ErrorMessage = null;
@@ -240,7 +256,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 InputGainDb = (float)InputGainDb,
                 OutputGainDb = (float)OutputGainDb,
                 EffectsEnabled = EffectsEnabled,
-                Effects = Effects.Select(e => EffectSettings.Capture(e.Effect)).ToList(),
+                Effects = Effects.Select(CaptureEffect).ToList(),
             });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -422,7 +438,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 var descriptor = _registry.Find(entry.Type);
                 if (effect is not null && descriptor is not null)
                 {
-                    AddEffectViewModel(effect, descriptor);
+                    AddEffectViewModel(effect, descriptor).IsCollapsed = entry.Collapsed;
                     _engine.Effects.Add(effect);
                 }
             }
@@ -431,22 +447,47 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         UpdatePositions();
     }
 
-    private void AddEffectViewModel(AudioEffect effect, EffectDescriptor descriptor)
+    private static EffectSettings CaptureEffect(EffectViewModel viewModel)
+    {
+        var settings = EffectSettings.Capture(viewModel.Effect);
+        settings.Collapsed = viewModel.IsCollapsed;
+        return settings;
+    }
+
+    private EffectViewModel AddEffectViewModel(AudioEffect effect, EffectDescriptor descriptor)
     {
         var viewModel = EffectViewModel.Create(effect, descriptor.Description);
         viewModel.RemoveCommand = new RelayCommand(() => RemoveEffect(viewModel));
         viewModel.MoveUpCommand = new RelayCommand(() => MoveEffect(viewModel, -1));
         viewModel.MoveDownCommand = new RelayCommand(() => MoveEffect(viewModel, +1));
+        viewModel.PropertyChanged += OnEffectPropertyChanged;
         Effects.Add(viewModel);
-        OnPropertyChanged(nameof(HasNoEffects));
+        OnEffectsChanged();
+        return viewModel;
     }
 
     private void RemoveEffect(EffectViewModel viewModel)
     {
         _engine.Effects.Remove(viewModel.Effect);
+        viewModel.PropertyChanged -= OnEffectPropertyChanged;
         Effects.Remove(viewModel);
-        OnPropertyChanged(nameof(HasNoEffects));
+        OnEffectsChanged();
         UpdatePositions();
+    }
+
+    private void OnEffectPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(EffectViewModel.IsCollapsed))
+        {
+            OnPropertyChanged(nameof(CollapseAllText));
+        }
+    }
+
+    private void OnEffectsChanged()
+    {
+        OnPropertyChanged(nameof(HasNoEffects));
+        OnPropertyChanged(nameof(HasEffects));
+        OnPropertyChanged(nameof(CollapseAllText));
     }
 
     private void MoveEffect(EffectViewModel viewModel, int delta)

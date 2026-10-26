@@ -48,12 +48,28 @@ public sealed class SettingsTests : IDisposable
         Assert.False(loaded.EffectsEnabled);
         Assert.Contains("\"latency\": \"Safe\"", File.ReadAllText(store.FilePath));
 
+        Assert.All(loaded.Effects!, e => Assert.False(e.Collapsed));
         var effects = loaded.Effects!.Select(e => e.Restore(EffectRegistry.Default)).ToList();
         var restoredPitch = Assert.IsType<PitchShiftEffect>(effects[0]);
         Assert.Equal(-5, restoredPitch.Semitones.Value);
         Assert.False(restoredPitch.IsEnabled);
         var restoredEq = Assert.IsType<EqualizerEffect>(effects[1]);
         Assert.Equal(4.5f, restoredEq.Bands[3].Value);
+    }
+
+    [Fact]
+    public void Remembers_which_effects_were_collapsed()
+    {
+        var store = new SettingsStore(Path.Combine(_directory, "settings.json"));
+        var settings = EffectSettings.Capture(new EqualizerEffect());
+        settings.Collapsed = true;
+        store.Save(new AppSettings { Effects = [settings] });
+
+        Assert.True(Assert.Single(store.Load().Effects!).Collapsed);
+
+        // Files written before the option existed load as expanded.
+        File.WriteAllText(store.FilePath, """{ "effects": [ { "type": "equalizer", "enabled": true, "parameters": {} } ] }""");
+        Assert.False(Assert.Single(store.Load().Effects!).Collapsed);
     }
 
     [Fact]

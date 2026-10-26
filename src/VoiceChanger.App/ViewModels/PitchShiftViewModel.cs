@@ -1,5 +1,7 @@
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using VoiceChanger.Core.Dsp;
 using VoiceChanger.Core.Effects;
 
 namespace VoiceChanger.App.ViewModels;
@@ -41,6 +43,41 @@ public sealed class PitchShiftViewModel : EffectViewModel
     }
 
     public IReadOnlyList<OctaveOptionViewModel> Octaves { get; }
+
+    public override string Summary
+    {
+        get
+        {
+            var culture = CultureInfo.CurrentCulture;
+            int semitones = _pitchShift.Semitones.IntValue;
+            int cents = _pitchShift.Cents.IntValue;
+            var parts = new List<string>
+            {
+                (semitones, cents) switch
+                {
+                    (0, 0) => "No pitch change",
+                    (0, _) => cents.ToString("+0;-0", culture) + " cents",
+                    (_, 0) => MusicalScale.FormatInterval(semitones),
+                    _ => MusicalScale.FormatInterval(semitones) + " " + cents.ToString("+0;-0", culture) + " cents",
+                },
+            };
+
+            if (_pitchShift.PreserveFormants.BoolValue)
+            {
+                float formantShift = _pitchShift.FormantShift.Value;
+                parts.Add(formantShift == 0
+                    ? "formants kept"
+                    : "formants " + formantShift.ToString("+0.0;-0.0", culture) + " semitones");
+            }
+
+            if (_pitchShift.Mix.Value < 100)
+            {
+                parts.Add(_pitchShift.Mix.Value.ToString("0", culture) + " % mix");
+            }
+
+            return string.Join(" · ", parts);
+        }
+    }
 
     /// <summary>Sets the pitch to exactly this many octaves up (positive) or down (negative).</summary>
     public void SelectOctave(int octaves) => _pitchShift.Semitones.Value = 12 * octaves;
