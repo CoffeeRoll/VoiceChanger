@@ -7,61 +7,23 @@ namespace VoiceChanger.Core.Audio;
 /// Moves audio from a capture stream to a render stream that run on independent clocks.
 /// <para>
 /// Capture thread (<see cref="ProcessInput"/>): channel conversion → input gain → effect chain →
-/// sample rate conversion → lock-free ring buffer. Render thread (<see cref="RenderOutput"/>): ring
-/// buffer → channel conversion → output gain.
-/// </para>
-/// <para>
-/// The amount of audio waiting in the ring buffer is the main source of added delay. Because audio
-/// arrives in blocks, the raw fill level jumps around and hides slow clock drift, so the render side
-/// estimates a continuous "virtual" fill: the frames in the buffer plus the frames the input device
-/// has captured since its last callback (derived from timestamps). A proportional controller steers
-/// the resampler ratio by at most 0.2 % so this level converges to one input block plus one output
-/// block plus <c>safetyMilliseconds</c>. That keeps the delay low and constant and compensates the
-/// drift between two independent devices without the periodic dropouts a fixed buffer would cause.
+/// <see cref="ClockBridge"/> (sample rate conversion and drift compensation). Render thread
+/// (<see cref="RenderOutput"/>): bridge → channel conversion → output gain.
 /// </para>
 /// </summary>
 public sealed class AudioProcessor
 {
     private const int MaxChunkFrames = 1024;
-    private const int FadeInFrames = 256;
-    private const double ControlWindowSeconds = 0.1;
-    private const double ControlTimeConstantSeconds = 2.0;
-    private const double FillSmoothingSeconds = 0.5;
-    private const double MaxCorrection = 0.002;
-    private const double RingBufferSeconds = 1.0;
-    private const double HardSkipSeconds = 0.06;
-    private const double MaxCaptureGapSeconds = 0.1;
 
     private readonly AudioFormat _input;
     private readonly AudioFormat _output;
     private readonly int _channels;
     private readonly EffectChain _chain;
-    private readonly Resampler _resampler;
-    private readonly FloatRingBuffer _ring;
-    private readonly float[] _processBuffer;
-    private readonly float[] _resampleBuffer;
-    private readonly int _safetyFrames;
-    private readonly int _controlWindowFrames;
-    private readonly TimeProvider _time;
+    private readonly ClockBridge _bridge;
+    private float[] _processBuffer;
     private float[] _renderBuffer;
-
-    // Render thread state.
-    private bool _primed;
-    private int _fadeInPosition = FadeInFrames;
-    private int _controlElapsedFrames;
-    private double _renderBlockFrames;
-    private double _virtualFill = -1;
-    private double _averageFill;
-
-    // Shared state.
-    private long _stepAdjustmentBits = BitConverter.DoubleToInt64Bits(1.0);
-    private long _lastCaptureTimestamp;
-    private int _captureBlockFrames;
     private float _inputGain = 1;
     private float _outputGain = 1;
-    private int _underruns;
-    private int _overflows;
-    private float _averageFillFrames;
 
     public AudioProcessor(
         AudioFormat input,
@@ -80,14 +42,9 @@ public sealed class AudioProcessor
         _output = output;
         _channels = processingChannels;
         _chain = chain;
-        _resampler = new Resampler(input.SampleRate, output.SampleRate, processingChannels);
-        _ring = new FloatRingBuffer((int)(output.SampleRate * RingBufferSeconds) * processingChannels);
-        _processBuffer = new float[MaxChunkFrames * processingChannels];
-        _resampleBuffer = new float[_resampler.MaxOutputFrames(MaxChunkFrames) * processingChannels];
+        _bridge = new ClockBridge(input.SampleRate, output.SampleRate, processingChannels, safetyMilliseconds, timeProvider);
+        _processBuffer = new float[4096 * processingChannels];
         _renderBuffer = new float[4096 * processingChannels];
-        _safetyFrames = Math.Max(0, safetyMilliseconds) * output.SampleRate / 1000;
-        _controlWindowFrames = (int)(output.SampleRate * ControlWindowSeconds);
-        _time = timeProvider ?? TimeProvider.System;
     }
 
     public AudioFormat InputFormat => _input;
@@ -115,22 +72,20 @@ public sealed class AudioProcessor
     }
 
     /// <summary>Number of times the output ran dry and had to insert silence.</summary>
-    public int Underruns => Volatile.Read(ref _underruns);
+    public int Underruns => _bridge.Underruns;
 
     /// <summary>Number of input blocks (partially) dropped because the buffer was full.</summary>
-    public int Overflows => Volatile.Read(ref _overflows);
+    public int Overflows => _bridge.Overflows;
 
     /// <summary>Average amount of audio waiting between input and output.</summary>
-    public double BufferedMilliseconds => Volatile.Read(ref _averageFillFrames) * 1000.0 / _output.SampleRate;
+    public double BufferedMilliseconds => _bridge.BufferedMilliseconds;
 
     /// <summary>Current clock drift compensation in parts per million.</summary>
-    public double DriftCorrectionPpm => (StepAdjustment - 1) * 1e6;
+    public double DriftCorrectionPpm => _bridge.DriftCorrectionPpm;
 
     /// <summary>Fixed delay of the resampler and the active effects in milliseconds.</summary>
     public double ProcessingLatencyMilliseconds =>
-        (_resampler.LatencyFrames + _chain.LatencyFrames) * 1000.0 / _input.SampleRate;
-
-    private double StepAdjustment => BitConverter.Int64BitsToDouble(Volatile.Read(ref _stepAdjustmentBits));
+        _bridge.ResamplerLatencyMilliseconds + _chain.LatencyFrames * 1000.0 / _input.SampleRate;
 
     /// <summary>Capture thread entry point: processes interleaved samples in the input format.</summary>
     public void ProcessInput(ReadOnlySpan<float> interleaved)
@@ -142,14 +97,16 @@ public sealed class AudioProcessor
             return;
         }
 
-        _resampler.StepAdjustment = StepAdjustment;
-        float gain = InputGain;
-        int queued = 0;
+        if (_processBuffer.Length < frames * _channels)
+        {
+            _processBuffer = new float[frames * _channels];
+        }
 
+        float gain = InputGain;
         for (int offset = 0; offset < frames; offset += MaxChunkFrames)
         {
             int count = Math.Min(MaxChunkFrames, frames - offset);
-            var block = _processBuffer.AsSpan(0, count * _channels);
+            var block = _processBuffer.AsSpan(offset * _channels, count * _channels);
             ChannelMapper.Map(interleaved.Slice(offset * inputChannels, count * inputChannels), inputChannels, block, _channels, count);
 
             if (gain != 1f)
@@ -169,20 +126,10 @@ public sealed class AudioProcessor
                 block.Clear();
                 _chain.ResetEffects();
             }
-
-            int produced = _resampler.Process(block, _resampleBuffer) * _channels;
-            int space = _ring.Free / _channels * _channels;
-            int written = _ring.Write(_resampleBuffer.AsSpan(0, Math.Min(produced, space)));
-            if (written < produced)
-            {
-                Interlocked.Increment(ref _overflows);
-            }
-
-            queued += written / _channels;
         }
 
-        Volatile.Write(ref _captureBlockFrames, queued);
-        Volatile.Write(ref _lastCaptureTimestamp, _time.GetTimestamp());
+        // One write per callback so the bridge sees the real input block size.
+        _bridge.Write(_processBuffer.AsSpan(0, frames * _channels));
     }
 
     /// <summary>Render thread entry point: fills the whole buffer with interleaved samples in the output format.</summary>
@@ -201,105 +148,23 @@ public sealed class AudioProcessor
         }
 
         var block = _renderBuffer.AsSpan(0, frames * _channels);
-        int available = _ring.Count / _channels;
-        _averageFill += (available - _averageFill) * 0.05;
-        Volatile.Write(ref _averageFillFrames, (float)_averageFill);
-
-        // Largest recent block sizes, decaying slowly so a single big callback is forgotten.
-        _renderBlockFrames = Math.Max(frames, _renderBlockFrames * 0.995);
-        double target = _renderBlockFrames + Volatile.Read(ref _captureBlockFrames) + _safetyFrames;
-
-        if (!_primed)
-        {
-            // Wait until there is enough audio for one input block, this callback and the safety margin.
-            if (available < target)
-            {
-                interleaved.Clear();
-                return;
-            }
-
-            _ring.Skip((available - (int)target) * _channels);
-            available = (int)target;
-            _primed = true;
-            _fadeInPosition = 0;
-            _virtualFill = -1;
-            _controlElapsedFrames = 0;
-        }
-
-        UpdateDriftControl(available, frames, target);
-
-        int read = _ring.Read(block[..(Math.Min(available, frames) * _channels)]) / _channels;
-        if (read < frames)
-        {
-            block[(read * _channels)..].Clear();
-            _primed = false;
-            Interlocked.Increment(ref _underruns);
-        }
-
-        ApplyFadeIn(block, read);
+        _bridge.Read(block);
         ChannelMapper.Map(block, _channels, interleaved, outputChannels, frames);
-
-        float gain = OutputGain;
-        for (int i = 0; i < interleaved.Length; i++)
-        {
-            float sample = interleaved[i] * gain;
-            interleaved[i] = sample > 1f ? 1f : sample < -1f ? -1f : sample;
-        }
-
+        ApplyGainAndClamp(interleaved, OutputGain);
         OutputMeter.Update(interleaved);
     }
 
-    private void UpdateDriftControl(int available, int frames, double target)
+    /// <summary>Applies a gain and clamps to full scale so nothing louder ever reaches a device.</summary>
+    internal static void ApplyGainAndClamp(Span<float> samples, float gain)
     {
-        // Frames captured since the last input callback have not reached the buffer yet, but they
-        // exist: counting them turns the saw-tooth fill level into a smooth, drift revealing signal.
-        double elapsed = (double)(_time.GetTimestamp() - Volatile.Read(ref _lastCaptureTimestamp)) / _time.TimestampFrequency;
-        double pending = Math.Clamp(elapsed, 0, MaxCaptureGapSeconds) * _output.SampleRate;
-        double fill = available + pending;
-
-        double smoothing = Math.Min(1.0, frames / (FillSmoothingSeconds * _output.SampleRate));
-        _virtualFill = _virtualFill < 0 ? fill : _virtualFill + (fill - _virtualFill) * smoothing;
-
-        _controlElapsedFrames += frames;
-        if (_controlElapsedFrames < _controlWindowFrames)
+        for (int i = 0; i < samples.Length; i++)
         {
-            return;
-        }
-
-        _controlElapsedFrames = 0;
-        double excess = _virtualFill - target;
-        if (excess > HardSkipSeconds * _output.SampleRate && available - frames > excess)
-        {
-            // Far too much audio queued up (e.g. after a hiccup): drop it instead of slowly draining.
-            _ring.Skip((int)excess * _channels);
-            _fadeInPosition = 0;
-            _virtualFill -= (int)excess;
-            excess = 0;
-        }
-
-        // Proportional controller: drain (or refill) the excess over the time constant.
-        double correction = Math.Clamp(excess / (ControlTimeConstantSeconds * _output.SampleRate), -MaxCorrection, MaxCorrection);
-        Volatile.Write(ref _stepAdjustmentBits, BitConverter.DoubleToInt64Bits(1 + correction));
-    }
-
-    private void ApplyFadeIn(Span<float> block, int frames)
-    {
-        if (_fadeInPosition >= FadeInFrames)
-        {
-            return;
-        }
-
-        for (int frame = 0; frame < frames && _fadeInPosition < FadeInFrames; frame++, _fadeInPosition++)
-        {
-            float gain = (float)_fadeInPosition / FadeInFrames;
-            for (int ch = 0; ch < _channels; ch++)
-            {
-                block[frame * _channels + ch] *= gain;
-            }
+            float sample = samples[i] * gain;
+            samples[i] = sample > 1f ? 1f : sample < -1f ? -1f : sample;
         }
     }
 
-    private static bool IsFinite(ReadOnlySpan<float> block)
+    internal static bool IsFinite(ReadOnlySpan<float> block)
     {
         foreach (float sample in block)
         {
@@ -312,7 +177,7 @@ public sealed class AudioProcessor
         return true;
     }
 
-    private static void ValidateFormat(AudioFormat format, string name)
+    internal static void ValidateFormat(AudioFormat format, string name)
     {
         if (format.SampleRate < 1000 || format.Channels < 1)
         {
