@@ -58,6 +58,11 @@ Tips:
 - **To use the voice in Discord, games, Zoom or OBS**, install a virtual audio cable such as
   [VB-CABLE](https://vb-audio.com/Cable/). Select *CABLE Input* as the **output** in VoiceChanger, then
   select *CABLE Output* as the **microphone** in the other app.
+- **Collapse effects to make room.** Click an effect's name (or the arrow next to it) to fold the
+  card down to a one-line summary of its settings, e.g. "+1 octave · formants kept" or, for
+  Auto Tune while you sing, "D4 → D4 · A minor · instant retune". **Collapse all** / **Expand all**
+  in the Effects header folds or opens every card. Collapsed cards stay collapsed the next time you
+  start the app.
 - **Double-click any effect slider** to reset it to its default value.
 - **If you hear crackles or dropouts**, choose a safer latency setting under Output. The status bar
   counts dropouts while audio is running.

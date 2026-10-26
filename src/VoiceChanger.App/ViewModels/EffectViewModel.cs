@@ -35,6 +35,9 @@ public abstract partial class EffectViewModel : ObservableObject
 
     public bool HasPresets => Presets.Count > 0;
 
+    /// <summary>The preset box is hidden on collapsed cards to leave room for the summary.</summary>
+    public bool ShowPresets => HasPresets && !IsCollapsed;
+
     /// <summary>Position in the chain, starting at 1.</summary>
     [ObservableProperty]
     public partial int Position { get; set; }
@@ -48,6 +51,21 @@ public abstract partial class EffectViewModel : ObservableObject
     /// <summary>The preset that is currently applied, or <c>null</c> once a value was changed by hand.</summary>
     [ObservableProperty]
     public partial EffectPreset? SelectedPreset { get; set; }
+
+    /// <summary>When collapsed only the card's header is shown, with a summary of the settings.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsExpanded))]
+    [NotifyPropertyChangedFor(nameof(Subtitle))]
+    [NotifyPropertyChangedFor(nameof(ShowPresets))]
+    public partial bool IsCollapsed { get; set; }
+
+    public bool IsExpanded => !IsCollapsed;
+
+    /// <summary>The line under the name: what the effect does, or a summary of its settings while collapsed.</summary>
+    public string Subtitle => IsCollapsed ? Summary : Description;
+
+    /// <summary>The current settings in a few words, e.g. "+1 octave · formants kept".</summary>
+    public virtual string Summary => SelectedPreset?.Name ?? "Custom settings";
 
     public bool IsEnabled
     {
@@ -79,6 +97,16 @@ public abstract partial class EffectViewModel : ObservableObject
     };
 
     [RelayCommand]
+    private void ToggleCollapsed() => IsCollapsed = !IsCollapsed;
+
+    /// <summary>Tells the view that <see cref="Summary"/> may read differently now.</summary>
+    protected void RefreshSummary()
+    {
+        OnPropertyChanged(nameof(Summary));
+        OnPropertyChanged(nameof(Subtitle));
+    }
+
+    [RelayCommand]
     private void ResetParameters()
     {
         _applyingPreset = true;
@@ -98,6 +126,7 @@ public abstract partial class EffectViewModel : ObservableObject
 
     partial void OnSelectedPresetChanged(EffectPreset? value)
     {
+        RefreshSummary();
         if (value is null)
         {
             return;
@@ -134,6 +163,8 @@ public abstract partial class EffectViewModel : ObservableObject
             // A partial preset (e.g. an auto-tune style) still applies after changing other settings.
             SelectedPreset = FindMatchingPreset();
         }
+
+        RefreshSummary();
     }
 }
 

@@ -138,7 +138,13 @@
               <TextBlock Classes="h2" Text="Effects" />
               <TextBlock Classes="label" Text="applied from top to bottom" />
             </StackPanel>
-            <DropDownButton x:Name="AddEffectButton" Grid.Column="2" ToolTip.Tip="Add another effect to the chain">
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="CollapseAllButton"
+                    Content="{Binding CollapseAllText}"
+                    Command="{Binding ToggleCollapseAllCommand}"
+                    IsVisible="{Binding HasEffects}"
+                    ToolTip.Tip="Show only the headers of the effects to make room, or open them all again" />
+            <DropDownButton x:Name="AddEffectButton" ToolTip.Tip="Add another effect to the chain">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Path Classes="icon" Data="{StaticResource IconPlus}" Width="14" Height="14" />
                 <TextBlock Text="Add effect" />
@@ -155,6 +161,7 @@
                 </MenuFlyout>
               </DropDownButton.Flyout>
             </DropDownButton>
+            </StackPanel>
           </Grid>
 
           <ScrollViewer Grid.Row="1" Padding="16,0,16,4" HorizontalScrollBarVisibility="Disabled">
@@ -162,7 +169,7 @@
               <ItemsControl x:Name="EffectList" ItemsSource="{Binding Effects}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:EffectViewModel">
-                    <Border Classes="effect" Classes.disabled="{Binding !IsEnabled}" Margin="0,0,0,12">
+                    <Border Classes="effect" Classes.disabled="{Binding !IsEnabled}" Margin="0,0,0,10">
                       <StackPanel Spacing="12">
                         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
                           <ToggleSwitch IsChecked="{Binding IsEnabled}"
@@ -171,18 +178,30 @@
                                         MinWidth="0"
                                         VerticalAlignment="Center"
                                         ToolTip.Tip="Turn this effect on or off" />
-                          <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                              <TextBlock Classes="label" Text="{Binding Position, StringFormat='{}#{0}'}" />
-                              <TextBlock Classes="h2" Text="{Binding Name}" />
-                            </StackPanel>
-                            <TextBlock Classes="muted" Text="{Binding Description}" />
-                          </StackPanel>
+                          <!-- Clicking the title collapses or expands the card. -->
+                          <Button Grid.Column="1"
+                                  Classes="cardHeader"
+                                  Command="{Binding ToggleCollapsedCommand}"
+                                  ToolTip.Tip="{Binding Description}">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                              <Panel VerticalAlignment="Top" Margin="0,3,0,0">
+                                <Path Classes="icon" Data="{StaticResource IconChevronDown}" IsVisible="{Binding IsExpanded}" />
+                                <Path Classes="icon" Data="{StaticResource IconChevronRight}" IsVisible="{Binding IsCollapsed}" />
+                              </Panel>
+                              <StackPanel Grid.Column="1" Spacing="2">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                  <TextBlock Classes="label" Text="{Binding Position, StringFormat='{}#{0}'}" />
+                                  <TextBlock Classes="h2" Text="{Binding Name}" />
+                                </StackPanel>
+                                <TextBlock Classes="muted" Classes.oneLine="{Binding IsCollapsed}" Text="{Binding Subtitle}" />
+                              </StackPanel>
+                            </Grid>
+                          </Button>
                           <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
                             <ComboBox ItemsSource="{Binding Presets}"
                                       SelectedItem="{Binding SelectedPreset}"
                                       PlaceholderText="Presets"
-                                      IsVisible="{Binding HasPresets}"
+                                      IsVisible="{Binding ShowPresets}"
                                       Width="140"
                                       Margin="0,0,6,0"
                                       ToolTip.Tip="Load a preset" />
@@ -200,7 +219,7 @@
                             </Button>
                           </StackPanel>
                         </Grid>
-                        <ContentControl Content="{Binding}" />
+                        <ContentControl Content="{Binding}" IsVisible="{Binding IsExpanded}" />
                       </StackPanel>
                     </Border>
                   </DataTemplate>

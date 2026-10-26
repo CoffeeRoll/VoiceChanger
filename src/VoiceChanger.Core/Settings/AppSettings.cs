@@ -33,6 +33,9 @@ public sealed class EffectSettings
 
     public bool Enabled { get; set; } = true;
 
+    /// <summary>Whether the effect's card was collapsed in the window.</summary>
+    public bool Collapsed { get; set; }
+
     public Dictionary<string, float> Parameters { get; set; } = [];
 
     public static EffectSettings Capture(AudioEffect effect)

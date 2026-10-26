@@ -32,6 +32,49 @@ public sealed partial class EqualizerViewModel : EffectViewModel
 
     public IReadOnlyList<ParameterViewModel> Filters { get; }
 
+    /// <summary>The filters and the biggest boost and cut, e.g. "Low cut 80 Hz · +4.0 dB at 4 kHz".</summary>
+    public override string Summary
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (_equalizer.LowCut.Value > _equalizer.LowCut.Minimum)
+            {
+                parts.Add("low cut " + _equalizer.LowCut.FormattedValue);
+            }
+
+            if (_equalizer.HighCut.Value < _equalizer.HighCut.Maximum)
+            {
+                parts.Add("high cut " + _equalizer.HighCut.FormattedValue);
+            }
+
+            var boost = _equalizer.Bands.MaxBy(b => b.Value)!;
+            var cut = _equalizer.Bands.MinBy(b => b.Value)!;
+            if (boost.Value > 0)
+            {
+                parts.Add($"{boost.FormattedValue} at {boost.Name}");
+            }
+
+            if (cut.Value < 0)
+            {
+                parts.Add($"{cut.FormattedValue} at {cut.Name}");
+            }
+
+            if (!_equalizer.OutputGain.IsDefault)
+            {
+                parts.Add("output " + _equalizer.OutputGain.FormattedValue);
+            }
+
+            if (parts.Count == 0)
+            {
+                return "Flat";
+            }
+
+            string summary = string.Join(" · ", parts);
+            return char.ToUpperInvariant(summary[0]) + summary[1..];
+        }
+    }
+
     public double[] ResponseFrequencies { get; }
 
     /// <summary>Magnitude response in dB at <see cref="ResponseFrequencies"/>.</summary>

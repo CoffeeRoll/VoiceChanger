@@ -47,6 +47,28 @@ public sealed partial class AutoTuneViewModel : EffectViewModel
 
     public IReadOnlyList<NoteChipViewModel> Notes { get; }
 
+    /// <summary>Scale and retune speed; while singing also the live note, e.g. "A3 → A3 · A minor · instant retune".</summary>
+    public override string Summary
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (HasPitch)
+            {
+                parts.Add($"{InputNote} → {OutputNote}");
+            }
+
+            parts.Add(RootPitchClass < 0 ? "Chromatic" : ScaleName);
+            parts.Add(_autoTune.RetuneSpeed.Value <= 0 ? "instant retune" : _autoTune.RetuneSpeed.FormattedValue + " retune");
+            if (_autoTune.Transpose.IntValue != 0)
+            {
+                parts.Add(_autoTune.Transpose.FormattedValue);
+            }
+
+            return string.Join(" · ", parts);
+        }
+    }
+
     /// <summary>Pitch classes of the selected key and scale, for the history grid.</summary>
     [ObservableProperty]
     public partial int ScaleMask { get; private set; }
@@ -105,11 +127,20 @@ public sealed partial class AutoTuneViewModel : EffectViewModel
         {
             Push(double.NaN, double.NaN);
             ShowNoPitch(processing ? "Sing or speak to see your pitch." : "Turn the effect on to see your pitch.");
+            if (IsCollapsed)
+            {
+                RefreshSummary();
+            }
+
             return;
         }
 
         Push(reading.InputNote, reading.OutputNote);
         ShowPitch(reading);
+        if (IsCollapsed)
+        {
+            RefreshSummary();
+        }
     }
 
     protected override void OnParameterChanged(object? sender, EventArgs e)
