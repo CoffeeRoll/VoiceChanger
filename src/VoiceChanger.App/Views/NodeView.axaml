@@ -1,0 +1,90 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:VoiceChanger.App.ViewModels"
+             xmlns:controls="using:VoiceChanger.App.Controls"
+             x:Class="VoiceChanger.App.Views.NodeView"
+             x:DataType="vm:NodeViewModel">
+
+  <UserControl.DataTemplates>
+    <!-- What the node shows between its outputs and inputs. -->
+    <DataTemplate DataType="vm:DeviceNodeViewModel">
+      <ComboBox Classes="compact"
+                ItemsSource="{Binding Devices}"
+                SelectedItem="{Binding SelectedDevice}"
+                PlaceholderText="{Binding PlaceholderText}"
+                HorizontalAlignment="Stretch"
+                ToolTip.Tip="{Binding DeviceLabel}" />
+    </DataTemplate>
+    <DataTemplate DataType="vm:NodeViewModel">
+      <TextBlock Classes="muted"
+                 Text="{Binding Summary}"
+                 IsVisible="{Binding HasSummary}"
+                 MaxLines="2"
+                 TextTrimming="CharacterEllipsis" />
+    </DataTemplate>
+  </UserControl.DataTemplates>
+
+  <Border Classes="node"
+          Classes.selected="{Binding IsSelected}"
+          Classes.kindSource="{Binding IsSource}"
+          Classes.kindEffect="{Binding IsEffect}"
+          Classes.kindMixing="{Binding IsMixing}"
+          Classes.kindOutput="{Binding IsOutput}"
+          Classes.bypassed="{Binding !IsEnabled}"
+          Width="230">
+    <StackPanel>
+      <Border Classes="nodeHeader">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+          <TextBlock Classes="nodeTitle" Text="{Binding Title}" ToolTip.Tip="{Binding Description}" />
+          <ToggleSwitch Grid.Column="1"
+                        IsVisible="{Binding CanBypass}"
+                        IsChecked="{Binding IsEnabled}"
+                        OnContent="{x:Null}"
+                        OffContent="{x:Null}"
+                        MinWidth="0"
+                        Margin="0,-6"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Turn this effect on or off" />
+        </Grid>
+      </Border>
+
+      <StackPanel Margin="0,6,0,9" Spacing="2">
+        <!-- Outputs on the right edge, like Blender. -->
+        <ItemsControl ItemsSource="{Binding Outputs}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:PortViewModel">
+              <Grid ColumnDefinitions="*,Auto" Height="24">
+                <TextBlock Classes="port" Text="{Binding Name}" HorizontalAlignment="Right" Margin="0,0,4,0" />
+                <controls:NodeSocket Grid.Column="1"
+                                     IsConnected="{Binding IsConnected}"
+                                     Margin="0,0,-9,0"
+                                     VerticalAlignment="Center"
+                                     ToolTip.Tip="Drag to an input to connect" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <ContentControl Content="{Binding}" Margin="10,2" />
+
+        <!-- Inputs on the left edge. -->
+        <ItemsControl ItemsSource="{Binding Inputs}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:PortViewModel">
+              <Grid ColumnDefinitions="Auto,*,Auto" Height="24">
+                <controls:NodeSocket IsConnected="{Binding IsConnected}"
+                                     Margin="-9,0,0,0"
+                                     VerticalAlignment="Center"
+                                     ToolTip.Tip="Drag from an output to connect; drag away to disconnect" />
+                <TextBlock Grid.Column="1" Classes="port" Text="{Binding Name}" Margin="4,0,0,0" />
+                <TextBlock Grid.Column="2" Classes="port detail" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" Margin="0,0,10,0" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <controls:LevelMeter Level="{Binding LevelDb}" Height="4" Margin="10,6,10,0" />
+      </StackPanel>
+    </StackPanel>
+  </Border>
+</UserControl>

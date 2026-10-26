@@ -16,6 +16,7 @@
       <Color x:Key="AccentSecondColor">#22D3EE</Color>
       <Color x:Key="SuccessColor">#3BD671</Color>
       <Color x:Key="DangerColor">#EB5757</Color>
+      <Color x:Key="WarningColor">#F2C94C</Color>
 
       <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource WindowBackgroundColor}" />
       <SolidColorBrush x:Key="CardBrush" Color="{StaticResource CardColor}" />
@@ -26,6 +27,13 @@
       <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
       <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
       <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}" />
+      <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" />
+
+      <!-- Node editor: a colour per kind of node (headers and chips). -->
+      <SolidColorBrush x:Key="SourceNodeBrush" Color="#2B7A52" />
+      <SolidColorBrush x:Key="EffectNodeBrush" Color="#5340B8" />
+      <SolidColorBrush x:Key="MixingNodeBrush" Color="#1D7486" />
+      <SolidColorBrush x:Key="OutputNodeBrush" Color="#A3602A" />
       <!-- Line icons on a 16x16 grid (drawn with a stroke). -->
       <StreamGeometry x:Key="IconClose">M4,4 L12,12 M12,4 L4,12</StreamGeometry>
       <StreamGeometry x:Key="IconUp">M8,13 L8,3 M4,7 L8,3 L12,7</StreamGeometry>
@@ -33,6 +41,10 @@
       <StreamGeometry x:Key="IconReset">M3.5,8 A4.5,4.5 0 1 0 5.2,4.5 M5.2,1.5 L5.2,4.6 L8.3,4.6</StreamGeometry>
       <StreamGeometry x:Key="IconRefresh">M12.5,8 A4.5,4.5 0 1 1 10.8,4.5 M10.8,1.5 L10.8,4.6 L7.7,4.6</StreamGeometry>
       <StreamGeometry x:Key="IconPlus">M8,3 L8,13 M3,8 L13,8</StreamGeometry>
+      <StreamGeometry x:Key="IconMinus">M3,8 L13,8</StreamGeometry>
+      <StreamGeometry x:Key="IconDuplicate">M5.5,5.5 L13,5.5 L13,13 L5.5,13 Z M3,10.5 L3,3 L10.5,3</StreamGeometry>
+      <StreamGeometry x:Key="IconTrash">M3,4.5 L13,4.5 M6.5,4.5 L6.5,2.8 L9.5,2.8 L9.5,4.5 M4.5,4.5 L5.2,13.2 L10.8,13.2 L11.5,4.5</StreamGeometry>
+      <StreamGeometry x:Key="IconFit">M2.5,6 L2.5,2.5 L6,2.5 M10,2.5 L13.5,2.5 L13.5,6 M13.5,10 L13.5,13.5 L10,13.5 M6,13.5 L2.5,13.5 L2.5,10</StreamGeometry>
       <StreamGeometry x:Key="IconChevronDown">M4,6 L8,10 L12,6</StreamGeometry>
       <StreamGeometry x:Key="IconChevronRight">M6,4 L10,8 L6,12</StreamGeometry>
       <StreamGeometry x:Key="IconArrowRight">M2,8 L14,8 M9.5,3.5 L14,8 L9.5,12.5</StreamGeometry>
@@ -45,6 +57,34 @@
         <GradientStop Offset="0" Color="{StaticResource AccentColor}" />
         <GradientStop Offset="1" Color="{StaticResource AccentSecondColor}" />
       </LinearGradientBrush>
+
+      <!-- Two or more options side by side, the chosen one filled (e.g. effect chain / node editor). -->
+      <ControlTheme x:Key="SegmentRadioButton" TargetType="RadioButton">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+        <Setter Property="Padding" Value="14,6" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+          <ControlTemplate>
+            <Border Name="PART_Border" Background="{TemplateBinding Background}" CornerRadius="7" Padding="{TemplateBinding Padding}">
+              <ContentPresenter Name="PART_ContentPresenter"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                Foreground="{TemplateBinding Foreground}"
+                                HorizontalContentAlignment="Center"
+                                VerticalContentAlignment="Center" />
+            </Border>
+          </ControlTemplate>
+        </Setter>
+        <Style Selector="^:pointerover">
+          <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        </Style>
+        <Style Selector="^:checked">
+          <Setter Property="Background" Value="{StaticResource AccentGradientBrush}" />
+          <Setter Property="Foreground" Value="White" />
+        </Style>
+      </ControlTheme>
     </ResourceDictionary>
   </Application.Resources>
 
@@ -173,6 +213,116 @@
     </Style>
     <Style Selector="Button.cardHeader:pressed /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="#22FFFFFF" />
+    </Style>
+
+    <Style Selector="Border.segmented">
+      <Setter Property="Background" Value="{StaticResource CardBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="9" />
+      <Setter Property="Padding" Value="3" />
+    </Style>
+
+    <!-- ============================== Node editor ============================== -->
+    <Style Selector="Border.node">
+      <Setter Property="Background" Value="{StaticResource CardRaisedBrush}" />
+      <Setter Property="BorderBrush" Value="#343A47" />
+      <Setter Property="BorderThickness" Value="1.5" />
+      <Setter Property="CornerRadius" Value="9" />
+      <Setter Property="BoxShadow" Value="0 6 18 0 #73000000" />
+    </Style>
+    <Style Selector="Border.node.selected">
+      <Setter Property="BorderBrush" Value="{StaticResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Border.node.bypassed">
+      <Setter Property="Opacity" Value="0.6" />
+    </Style>
+    <Style Selector="Border.nodeHeader">
+      <Setter Property="Height" Value="34" />
+      <Setter Property="Padding" Value="10,0,6,0" />
+      <Setter Property="CornerRadius" Value="7.5,7.5,0,0" />
+    </Style>
+    <Style Selector="Border.node.kindSource Border.nodeHeader, Border.categoryChip.kindSource">
+      <Setter Property="Background" Value="{StaticResource SourceNodeBrush}" />
+    </Style>
+    <Style Selector="Border.node.kindEffect Border.nodeHeader, Border.categoryChip.kindEffect">
+      <Setter Property="Background" Value="{StaticResource EffectNodeBrush}" />
+    </Style>
+    <Style Selector="Border.node.kindMixing Border.nodeHeader, Border.categoryChip.kindMixing">
+      <Setter Property="Background" Value="{StaticResource MixingNodeBrush}" />
+    </Style>
+    <Style Selector="Border.node.kindOutput Border.nodeHeader, Border.categoryChip.kindOutput">
+      <Setter Property="Background" Value="{StaticResource OutputNodeBrush}" />
+    </Style>
+    <Style Selector="TextBlock.nodeTitle">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="TextBlock.port">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.port.detail">
+      <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+      <Setter Property="FontFeatures" Value="+tnum" />
+    </Style>
+    <Style Selector="ComboBox.compact">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="8,2" />
+    </Style>
+    <Style Selector="Border.categoryChip">
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.categoryChip > TextBlock">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Border.canvasHelp">
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="VerticalAlignment" Value="Bottom" />
+      <Setter Property="Margin" Value="12" />
+      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Background" Value="#D9171A21" />
+    </Style>
+    <Style Selector="Border.hint">
+      <Setter Property="Background" Value="#26F2C94C" />
+      <Setter Property="BorderBrush" Value="{StaticResource WarningBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="10,4" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+    <Style Selector="Border.channel">
+      <Setter Property="Background" Value="{StaticResource CardRaisedBrush}" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+    <Style Selector="Border.channel.muted">
+      <Setter Property="Opacity" Value="0.6" />
+    </Style>
+    <Style Selector="ToggleButton.mute">
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="24" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ToggleButton.mute:checked /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource DangerBrush}" />
+      <Setter Property="Foreground" Value="White" />
     </Style>
 
     <Style Selector="Button.primary">

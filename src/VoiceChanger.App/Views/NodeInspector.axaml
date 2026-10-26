@@ -1,0 +1,181 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:VoiceChanger.App.ViewModels"
+             xmlns:views="using:VoiceChanger.App.Views"
+             xmlns:controls="using:VoiceChanger.App.Controls"
+             x:Class="VoiceChanger.App.Views.NodeInspector"
+             x:DataType="vm:NodeEditorViewModel">
+
+  <!-- Settings of the selected node. -->
+  <Border Classes="card" Padding="0">
+    <Panel>
+      <StackPanel IsVisible="{Binding !HasSelection}" Margin="18" Spacing="14">
+        <TextBlock Classes="h2" Text="Inspector" />
+        <TextBlock Classes="muted" Text="Select a node to change its settings." />
+        <Border Background="{StaticResource CardRaisedBrush}" CornerRadius="8" Padding="12,10">
+          <StackPanel Spacing="8">
+            <TextBlock Classes="label" FontWeight="SemiBold" Text="Building a patch" />
+            <TextBlock Classes="muted" Text="• Audio flows from left to right: from the sockets on the right of a node into the sockets on the left of the next." />
+            <TextBlock Classes="muted" Text="• Drag from a socket to another to connect them. Drag a wire away from an input to disconnect it." />
+            <TextBlock Classes="muted" Text="• Use a mixer to combine several sources. An output can feed any number of inputs." />
+            <TextBlock Classes="muted" Text="• Add several Audio Input nodes to use several microphones at once, and several Audio Output nodes to play on several devices." />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+      <ScrollViewer IsVisible="{Binding HasSelection}" HorizontalScrollBarVisibility="Disabled">
+        <ContentControl x:Name="Selection" Content="{Binding SelectedNode}" Margin="16" HorizontalContentAlignment="Stretch">
+          <ContentControl.ContentTemplate>
+            <DataTemplate x:DataType="vm:NodeViewModel">
+              <StackPanel Spacing="16">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                  <StackPanel Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Border Classes="categoryChip"
+                              Classes.kindSource="{Binding IsSource}"
+                              Classes.kindEffect="{Binding IsEffect}"
+                              Classes.kindMixing="{Binding IsMixing}"
+                              Classes.kindOutput="{Binding IsOutput}">
+                        <TextBlock Text="{Binding CategoryName}" />
+                      </Border>
+                      <TextBlock Classes="h2" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <TextBlock Classes="muted" Text="{Binding Description}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Top">
+                    <Button Classes="icon" Command="{Binding DuplicateCommand}" ToolTip.Tip="Duplicate this node (Ctrl+D)">
+                      <Path Classes="icon" Data="{StaticResource IconDuplicate}" />
+                    </Button>
+                    <Button x:Name="DeleteNodeButton" Classes="icon" Command="{Binding DeleteCommand}" ToolTip.Tip="Delete this node (Del)">
+                      <Path Classes="icon" Data="{StaticResource IconTrash}" />
+                    </Button>
+                  </StackPanel>
+                </Grid>
+
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="label" Text="Name" />
+                  <TextBox x:Name="NodeNameBox" Text="{Binding Label}" Watermark="{Binding TypeName}" />
+                </StackPanel>
+
+                <ContentControl Content="{Binding}" HorizontalContentAlignment="Stretch">
+                  <ContentControl.DataTemplates>
+                    <DataTemplate DataType="vm:DeviceNodeViewModel">
+                      <StackPanel Spacing="16">
+                        <StackPanel Spacing="6">
+                          <TextBlock Classes="label" Text="{Binding DeviceLabel}" />
+                          <ComboBox ItemsSource="{Binding Devices}"
+                                    SelectedItem="{Binding SelectedDevice}"
+                                    PlaceholderText="{Binding PlaceholderText}"
+                                    HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                        <views:ParameterEditor DataContext="{Binding Level}" />
+                        <StackPanel Spacing="6">
+                          <TextBlock Classes="label" Text="Level" />
+                          <controls:LevelMeter Level="{Binding LevelDb}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </DataTemplate>
+
+                    <DataTemplate DataType="vm:EffectNodeViewModel">
+                      <StackPanel Spacing="14">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                          <ToggleSwitch IsChecked="{Binding IsEnabled}"
+                                        OnContent="On"
+                                        OffContent="Bypassed"
+                                        MinWidth="0"
+                                        VerticalAlignment="Center"
+                                        ToolTip.Tip="Turn this effect on or off" />
+                          <ComboBox Grid.Column="1"
+                                    ItemsSource="{Binding Effect.Presets}"
+                                    SelectedItem="{Binding Effect.SelectedPreset}"
+                                    PlaceholderText="Presets"
+                                    IsVisible="{Binding Effect.HasPresets}"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Center"
+                                    ToolTip.Tip="Load a preset" />
+                          <Button Grid.Column="2" Classes="icon" Command="{Binding Effect.ResetParametersCommand}" ToolTip.Tip="Reset all settings of this effect">
+                            <Path Classes="icon" Data="{StaticResource IconReset}" />
+                          </Button>
+                        </Grid>
+                        <ContentControl Content="{Binding Effect}" HorizontalContentAlignment="Stretch" />
+                      </StackPanel>
+                    </DataTemplate>
+
+                    <DataTemplate DataType="vm:MixerNodeViewModel">
+                      <StackPanel Spacing="12">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Classes="label" Text="{Binding InputCount, StringFormat='{}{0} inputs'}" />
+                          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
+                            <Button Classes="icon" Command="{Binding RemoveInputCommand}" ToolTip.Tip="Remove the last input">
+                              <Path Classes="icon" Data="{StaticResource IconMinus}" />
+                            </Button>
+                            <Button x:Name="AddMixerInputButton" Classes="icon" Command="{Binding AddInputCommand}" ToolTip.Tip="Add an input (up to eight)">
+                              <Path Classes="icon" Data="{StaticResource IconPlus}" />
+                            </Button>
+                          </StackPanel>
+                        </Grid>
+
+                        <ItemsControl ItemsSource="{Binding Channels}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:MixerChannelViewModel">
+                              <Border Classes="channel" Classes.muted="{Binding Mute.IsOn}">
+                                <StackPanel Spacing="2">
+                                  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                      <TextBlock Classes="value" FontWeight="SemiBold" Text="{Binding Name}" />
+                                      <TextBlock Classes="label" Text="not connected" IsVisible="{Binding !IsConnected}" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Classes="value" Text="{Binding Gain.DisplayValue}" />
+                                    <ToggleButton Grid.Column="2"
+                                                  Classes="mute"
+                                                  Content="M"
+                                                  IsChecked="{Binding Mute.IsOn}"
+                                                  ToolTip.Tip="Mute this input" />
+                                  </Grid>
+                                  <Slider DataContext="{Binding Gain}"
+                                          Minimum="0"
+                                          Maximum="1"
+                                          SmallChange="0.01"
+                                          LargeChange="0.1"
+                                          Value="{Binding Position}"
+                                          ToolTip.Tip="Volume of this input. Double-click to reset." />
+                                  <controls:LevelMeter Level="{Binding LevelDb}" Height="4" />
+                                </StackPanel>
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <views:ParameterEditor DataContext="{Binding Master}" />
+                        <StackPanel Spacing="6">
+                          <TextBlock Classes="label" Text="Mix level" />
+                          <controls:LevelMeter Level="{Binding LevelDb}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </DataTemplate>
+
+                    <DataTemplate DataType="vm:GenericNodeViewModel">
+                      <StackPanel Spacing="12">
+                        <ItemsControl ItemsSource="{Binding Parameters}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ParameterViewModel">
+                              <views:ParameterEditor Margin="0,0,0,6" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <StackPanel Spacing="6">
+                          <TextBlock Classes="label" Text="Level" />
+                          <controls:LevelMeter Level="{Binding LevelDb}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ContentControl.DataTemplates>
+                </ContentControl>
+              </StackPanel>
+            </DataTemplate>
+          </ContentControl.ContentTemplate>
+        </ContentControl>
+      </ScrollViewer>
+    </Panel>
+  </Border>
+</UserControl>

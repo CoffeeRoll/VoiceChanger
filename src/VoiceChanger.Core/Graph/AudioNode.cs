@@ -141,7 +141,7 @@ public abstract class AudioNode
         get => _label;
         set
         {
-            value = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            value = string.IsNullOrWhiteSpace(value) ? null : value;
             if (_label == value)
             {
                 return;

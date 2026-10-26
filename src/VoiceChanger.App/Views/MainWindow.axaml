@@ -50,9 +50,27 @@
           </StackPanel>
         </StackPanel>
 
+        <!-- A simple chain of effects, or a node editor for anything more involved. -->
+        <Border Grid.Column="1" Classes="segmented" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="40,0,0,0">
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <RadioButton x:Name="ChainModeButton"
+                         Theme="{StaticResource SegmentRadioButton}"
+                         GroupName="EditorMode"
+                         IsChecked="{Binding IsChainMode}"
+                         Content="Effect chain"
+                         ToolTip.Tip="One input, a list of effects, one output" />
+            <RadioButton x:Name="NodeModeButton"
+                         Theme="{StaticResource SegmentRadioButton}"
+                         GroupName="EditorMode"
+                         IsChecked="{Binding IsNodeMode}"
+                         Content="Node editor"
+                         ToolTip.Tip="Wire up any number of inputs, effects, mixers and outputs" />
+          </StackPanel>
+        </Border>
+
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
           <!-- Step 4: master switch for every effect. -->
-          <Border Classes="step" ToolTip.Tip="Step 4: turn the effects on or off">
+          <Border Classes="step" IsVisible="{Binding IsChainMode}" ToolTip.Tip="Step 4: turn the effects on or off">
             <TextBlock Text="4" />
           </Border>
           <ToggleSwitch x:Name="EffectsSwitch"
@@ -82,7 +100,7 @@
     </Border>
 
     <!-- ===================== Signal path: input → effects → output ===================== -->
-    <Grid Grid.Row="1" Margin="24,20,24,16" ColumnDefinitions="280,32,*,32,280">
+    <Grid Grid.Row="1" Margin="24,20,24,16" ColumnDefinitions="280,32,*,32,280" IsVisible="{Binding IsChainMode}">
 
       <!-- Step 1: input -->
       <Border Grid.Column="0" Classes="card" VerticalAlignment="Top">
@@ -285,6 +303,66 @@
           </Border>
         </StackPanel>
       </Border>
+    </Grid>
+
+    <!-- ============================== Node editor ============================== -->
+    <Grid Grid.Row="1" Margin="24,14,24,16" RowDefinitions="Auto,*" RowSpacing="10" IsVisible="{Binding IsNodeMode}">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="8">
+        <DropDownButton x:Name="AddNodeButton" ToolTip.Tip="Add a node (or right-click the canvas, or press Shift+A)">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Path Classes="icon" Data="{StaticResource IconPlus}" Width="14" Height="14" />
+            <TextBlock Text="Add node" />
+          </StackPanel>
+          <DropDownButton.Flyout>
+            <MenuFlyout Placement="BottomEdgeAlignedLeft" ItemsSource="{Binding NodeEditor.AddNodeOptions}">
+              <MenuFlyout.ItemContainerTheme>
+                <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}" x:DataType="vm:AddNodeOption">
+                  <Setter Property="Header" Value="{Binding Name}" />
+                  <Setter Property="Command" Value="{Binding Command}" />
+                  <Setter Property="ToolTip.Tip" Value="{Binding Description}" />
+                </ControlTheme>
+              </MenuFlyout.ItemContainerTheme>
+            </MenuFlyout>
+          </DropDownButton.Flyout>
+        </DropDownButton>
+        <Button Grid.Column="1" Command="{Binding NodeEditor.FitViewCommand}" ToolTip.Tip="Show every node (Home)">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Path Classes="icon" Data="{StaticResource IconFit}" Width="14" Height="14" />
+            <TextBlock Text="Fit" />
+          </StackPanel>
+        </Button>
+        <TextBlock Grid.Column="2" Classes="label" Text="{Binding NodeEditor.ZoomText}" MinWidth="40" ToolTip.Tip="Zoom (scroll to change)" />
+        <Border Grid.Column="3" Classes="hint" IsVisible="{Binding NodeEditor.HasHint}">
+          <TextBlock x:Name="NodeHint" Text="{Binding NodeEditor.Hint}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
+        </Border>
+        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="10">
+          <Button Classes="icon" Command="{Binding RefreshDevicesCommand}" ToolTip.Tip="Refresh the device lists">
+            <Path Classes="icon" Data="{StaticResource IconRefresh}" />
+          </Button>
+          <TextBlock Classes="label" Text="Latency" />
+          <ComboBox ItemsSource="{Binding LatencyOptions}"
+                    SelectedItem="{Binding SelectedLatency}"
+                    Width="190"
+                    ToolTip.Tip="{Binding SelectedLatency.Description}" />
+          <TextBlock Classes="value" Text="{Binding LatencyText}" MinWidth="48" ToolTip.Tip="Estimated delay of the slowest path from an input to the main output" />
+          <CheckBox IsChecked="{Binding MonoProcessing}"
+                    Content="Mono"
+                    ToolTip.Tip="Process everything in mono (recommended for voice; half the work). Untick for stereo." />
+        </StackPanel>
+      </Grid>
+
+      <Grid Grid.Row="1">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" MinWidth="360" />
+          <ColumnDefinition Width="10" />
+          <ColumnDefinition Width="420" MinWidth="320" />
+        </Grid.ColumnDefinitions>
+        <Border Classes="card" Padding="0" ClipToBounds="True">
+          <views:NodeEditorView x:Name="NodeEditorCanvas" DataContext="{Binding NodeEditor}" />
+        </Border>
+        <GridSplitter Grid.Column="1" Background="Transparent" ResizeDirection="Columns" />
+        <views:NodeInspector x:Name="Inspector" Grid.Column="2" DataContext="{Binding NodeEditor}" />
+      </Grid>
     </Grid>
 
     <!-- ============================== Status bar ============================== -->

@@ -39,8 +39,12 @@ pick an output, and hear the result live with low delay.
   Natural octave down, Bigger voice, Smaller voice.
 - **Auto Tune:** detects the pitch of your voice and pulls it to the nearest note of a key and scale.
   See [Auto Tune](#auto-tune) below.
+- **Node editor** for anything beyond one microphone and one chain: several inputs at once, a
+  **mixer** to combine them, effects anywhere in between, and several outputs. See
+  [Node editor](#node-editor) below.
 - Input and output **level meters**, input gain and output volume.
-- **Remembers your settings**: devices, effects, every effect setting and the latency preset.
+- **Remembers your settings**: devices, effects, every effect setting, the node graph and the latency
+  preset.
 
 ## How to use it
 
@@ -67,6 +71,54 @@ Tips:
 - **If you hear crackles or dropouts**, choose a safer latency setting under Output. The status bar
   counts dropouts while audio is running.
 - Settings are saved to `%APPDATA%\VoiceChanger\settings.json`.
+
+## Node editor
+
+![Node editor](docs/node-editor.png)
+
+Switch from **Effect chain** to **Node editor** at the top of the window to build the signal path out
+of nodes and wires, like the shader editor in Blender. The first time you open it, your current chain
+becomes the starting graph: *Audio Input → your effects → Mixer → Audio Output*.
+
+Nodes:
+
+| Node | What it does |
+| --- | --- |
+| Audio Input | Audio from a microphone, line input or any other recording device. Add one per device to use several at once. Has its own gain. |
+| Tone Generator | A sine, triangle, sawtooth or square wave, or white noise. Handy for testing a patch, or as a drone under your voice. |
+| Pitch Shifter, Auto Tune, Equalizer | The effects, with the same settings and presets as in the chain. The switch in the node's header turns it on or off. |
+| Mixer | Combines 2 to 8 signals. Each input has a volume fader, a mute button and a level meter, and there is a master volume. |
+| Audio Output | Plays the signal on a device. Add one per device to play on several at once, e.g. your headphones and a virtual cable. Has its own volume. |
+
+Working with nodes:
+
+- **Connect:** drag from a socket on the right of a node (an output) to a socket on the left of
+  another (an input), or the other way round. An output can feed any number of inputs; an input takes
+  one wire, so a new wire replaces the old one. Wires that would form a loop are refused.
+- **Disconnect or re-route:** drag a wire away from the input it is plugged into, and drop it on
+  another input or on empty space.
+- **Add nodes:** **Add node** in the toolbar, right-click the canvas, or press **Shift+A**.
+- **Select** a node by clicking it. The inspector on the right shows all its settings, including the
+  full effect editors, and lets you give the node a name (e.g. "Guitar").
+- **Move** a node by dragging it. Drag the background (or use the middle mouse button) to move
+  around, and scroll to zoom. **Fit** (or **Home**) shows the whole graph.
+- **Delete** removes the selected node, **Ctrl+D** duplicates it. Right-click a node for the same.
+- **Effects on/off**, **Start/Stop**, the latency setting and **Mono** work the same as in the chain.
+  Editing the graph while audio is running takes effect immediately with a short fade; adding,
+  removing or changing a *device* briefly restarts the audio.
+
+How the devices are kept in sync: the first Audio Output node's device is the master clock. Each time it
+needs audio, the app pulls the latest audio from every input device, runs the whole graph and hands
+the result to the other output devices. Every other device runs on its own clock, so each one gets its
+own sample rate conversion and drift compensation, the same way the chain connects its two devices.
+
+Limitations:
+
+- When signals that went through effects with different delays meet in a mixer, they are not
+  re-aligned. For example, a dry voice mixed with the same voice through the phase vocoder is offset by
+  about 20 ms.
+- An Audio Input node that isn't connected to anything still opens its device, so its level meter keeps
+  working.
 
 ## Auto Tune
 
@@ -155,6 +207,11 @@ work on Windows. On other systems the window opens, but the device lists are emp
   render side estimates how full it is, counting audio already captured but not yet delivered, and nudges
   the resampler ratio by a few hundred parts per million. That keeps the buffer at about one block plus
   a safety margin. As a result the delay stays low and steady and no samples are dropped.
+- In the node editor the graph runs on the render thread of the main output instead. Each other input
+  and output device is connected to it through the same kind of buffer, resampler and drift control.
+  The graph is compiled into an immutable plan (only nodes that lead to an output, in dependency order,
+  with a buffer per output socket). Edits publish a new plan that the audio thread picks up on its
+  next block.
 - Devices are opened in WASAPI shared mode with event-driven buffers. The audio threads run at the
   "Pro Audio" scheduling priority of the Windows Multimedia Class Scheduler Service (MMCSS).
 
@@ -162,11 +219,11 @@ work on Windows. On other systems the window opens, but the device lists are emp
 
 | Project | Contents |
 | --- | --- |
-| `src/VoiceChanger.Core` | Platform-independent DSP and engine: biquad filters, FFT, resampler, ring buffer, the effects, the effect chain, the audio processor/engine and the settings. |
+| `src/VoiceChanger.Core` | Platform-independent DSP and engine: biquad filters, FFT, resampler, ring buffer, the effects, the effect chain, the audio processor/engine, the node graph and its multi-device engine, and the settings. |
 | `src/VoiceChanger.Audio.Wasapi` | Windows audio backend built on [NAudio](https://github.com/naudio/NAudio) (WASAPI). |
 | `src/VoiceChanger.App` | The desktop app, built with [Avalonia UI](https://avaloniaui.net/) and CommunityToolkit.Mvvm. |
 | `tests/VoiceChanger.Core.Tests` | Checks the DSP output: filter responses, pitch shifting and pitch detection accuracy, formant preservation on synthetic vowels, auto-tune correction, resampling, drift compensation with simulated device clocks, and settings. |
-| `tests/VoiceChanger.App.Tests` | Headless UI tests that load the real window with fake audio devices and render screenshots. |
+| `tests/VoiceChanger.App.Tests` | Headless UI tests that load the real window with fake audio devices, drive the node editor with the mouse, and render screenshots. |
 
 ### Adding an effect
 
@@ -175,7 +232,8 @@ work on Windows. On other systems the window opens, but the device lists are emp
 2. Register the effect in `EffectRegistry.CreateDefault()`.
 
 The UI builds a generic editor from the parameters (sliders, choices, switches), so the new effect
-appears under **Add effect** without any UI code. Settings are saved and restored automatically.
+appears under **Add effect**, and as a node under **Add node**, without any UI code. Settings are saved
+and restored automatically.
 
 ```csharp
 public sealed class GainEffect : AudioEffect
