@@ -54,7 +54,7 @@
 
                 <StackPanel Spacing="6">
                   <TextBlock Classes="label" Text="Name" />
-                  <TextBox x:Name="NodeNameBox" Text="{Binding Label}" Watermark="{Binding TypeName}" />
+                  <TextBox x:Name="NodeNameBox" Text="{Binding Label}" PlaceholderText="{Binding TypeName}" />
                 </StackPanel>
 
                 <ContentControl Content="{Binding}" HorizontalContentAlignment="Stretch">
