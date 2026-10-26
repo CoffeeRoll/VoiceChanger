@@ -21,6 +21,9 @@
     <DataTemplate DataType="vm:EqualizerViewModel">
       <views:EqualizerEditor />
     </DataTemplate>
+    <DataTemplate DataType="vm:PitchShiftViewModel">
+      <views:PitchShiftEditor />
+    </DataTemplate>
     <DataTemplate DataType="vm:AutoTuneViewModel">
       <views:AutoTuneEditor />
     </DataTemplate>

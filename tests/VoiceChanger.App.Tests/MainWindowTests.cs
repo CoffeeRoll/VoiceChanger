@@ -49,7 +49,7 @@ public sealed class MainWindowTests : IDisposable
 
         // Both editors are actually materialised in the visual tree.
         Assert.Single(window.GetVisualDescendants().OfType<EqualizerEditor>());
-        Assert.Single(window.GetVisualDescendants().OfType<GenericEffectEditor>());
+        Assert.Single(window.GetVisualDescendants().OfType<PitchShiftEditor>());
         Assert.Equal(2, window.GetVisualDescendants().OfType<LevelMeter>().Count());
         Assert.Single(window.GetVisualDescendants().OfType<FrequencyResponseView>());
 
@@ -183,7 +183,7 @@ public sealed class MainWindowTests : IDisposable
 
         pitch.SelectedPreset = pitch.Presets.Single(p => p.Name == "Chipmunk");
         Assert.Equal(12, semitones.Parameter.Value);
-        Assert.Equal("+12 semitones", semitones.DisplayValue);
+        Assert.Equal("+1 octave", semitones.DisplayValue);
         Assert.NotNull(pitch.SelectedPreset);
 
         // Integer parameters snap: halfway between -24 and +24 is 0.
@@ -195,6 +195,41 @@ public sealed class MainWindowTests : IDisposable
         pitch.ResetParametersCommand.Execute(null);
         Assert.True(pitch.Parameters.All(p => p.Parameter.IsDefault));
         Assert.Equal("Natural", pitch.SelectedPreset?.Name);
+
+        window.Close();
+        vm.Dispose();
+    }
+
+    [AvaloniaFact]
+    public void Octave_buttons_shift_by_whole_octaves()
+    {
+        var (window, vm) = Show(new MainWindowViewModel(new FakeAudioBackend(), Store()));
+        var pitch = vm.Effects.OfType<PitchShiftViewModel>().Single();
+        var semitones = pitch.Parameters.Single(p => p.Parameter.Id == "semitones");
+
+        // The buttons are on screen, from two octaves down to two octaves up.
+        var buttons = window.GetVisualDescendants().OfType<ItemsControl>().Single(c => c.Name == "OctaveButtons");
+        Assert.Equal(5, buttons.ItemCount);
+        Assert.Equal(["-2", "-1", "0", "+1", "+2"], pitch.Octaves.Select(o => o.Label));
+
+        pitch.Octaves.Single(o => o.Octaves == 1).SelectCommand.Execute(null);
+        Assert.Equal(12, semitones.Parameter.Value);
+        Assert.Equal("+1 octave", semitones.DisplayValue);
+        Assert.Equal([1], pitch.Octaves.Where(o => o.IsSelected).Select(o => o.Octaves));
+
+        pitch.Octaves.Single(o => o.Octaves == -2).SelectCommand.Execute(null);
+        Assert.Equal(-24, semitones.Parameter.Value);
+        Assert.Equal("-2 octaves", semitones.DisplayValue);
+        Assert.Equal([-2], pitch.Octaves.Where(o => o.IsSelected).Select(o => o.Octaves));
+
+        // In between whole octaves no button is lit and the label spells out the interval.
+        semitones.Parameter.Value = 15;
+        Assert.DoesNotContain(pitch.Octaves, o => o.IsSelected);
+        Assert.Equal("+1 octave +3 semitones", semitones.DisplayValue);
+
+        // Presets light up the matching octave.
+        pitch.SelectedPreset = pitch.Presets.Single(p => p.Name == "Monster");
+        Assert.Equal([-1], pitch.Octaves.Where(o => o.IsSelected).Select(o => o.Octaves));
 
         window.Close();
         vm.Dispose();

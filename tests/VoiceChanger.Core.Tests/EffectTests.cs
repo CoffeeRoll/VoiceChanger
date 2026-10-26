@@ -151,6 +151,10 @@ public class PitchShiftTests
         { PitchShiftEffect.PhaseVocoderMode, 12, 2.0 },
         { PitchShiftEffect.PhaseVocoderMode, -12, 0.5 },
         { PitchShiftEffect.PhaseVocoderMode, 5, Math.Pow(2, 5 / 12.0) },
+        { PitchShiftEffect.GranularMode, 24, 4.0 },
+        { PitchShiftEffect.GranularMode, -24, 0.25 },
+        { PitchShiftEffect.PhaseVocoderMode, 24, 4.0 },
+        { PitchShiftEffect.PhaseVocoderMode, -24, 0.25 },
     };
 
     [Theory]

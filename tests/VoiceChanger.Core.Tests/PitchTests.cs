@@ -14,6 +14,19 @@ public class MusicalScaleTests
     public void Names_notes_with_octaves(int note, string expected) =>
         Assert.Equal(expected, MusicalScale.NoteName(note));
 
+    [Theory]
+    [InlineData(0, "0 semitones")]
+    [InlineData(1, "+1 semitone")]
+    [InlineData(-5, "-5 semitones")]
+    [InlineData(12, "+1 octave")]
+    [InlineData(-12, "-1 octave")]
+    [InlineData(15, "+1 octave +3 semitones")]
+    [InlineData(-13, "-1 octave -1 semitone")]
+    [InlineData(24, "+2 octaves")]
+    [InlineData(-23, "-1 octave -11 semitones")]
+    public void Describes_intervals_in_octaves_and_semitones(int semitones, string expected) =>
+        Assert.Equal(expected, MusicalScale.FormatInterval(semitones));
+
     [Fact]
     public void Converts_between_frequency_and_note()
     {

@@ -63,6 +63,27 @@ public static class MusicalScale
     public static bool IsInScale(int note, int mask) => (mask & (1 << PitchClass(note))) != 0;
 
     /// <summary>
+    /// Describes a shift in whole octaves plus the remaining semitones, e.g. "+1 octave",
+    /// "+1 octave +3 semitones", "-2 octaves" or "+5 semitones".
+    /// </summary>
+    public static string FormatInterval(int semitones)
+    {
+        if (semitones == 0)
+        {
+            return "0 semitones";
+        }
+
+        string sign = semitones > 0 ? "+" : "-";
+        int size = Math.Abs(semitones);
+        int octaves = size / 12;
+        int rest = size % 12;
+
+        string octavePart = octaves == 0 ? "" : $"{sign}{octaves} octave{(octaves == 1 ? "" : "s")}";
+        string semitonePart = rest == 0 ? "" : $"{sign}{rest} semitone{(rest == 1 ? "" : "s")}";
+        return octavePart.Length > 0 && semitonePart.Length > 0 ? $"{octavePart} {semitonePart}" : octavePart + semitonePart;
+    }
+
+    /// <summary>
     /// The scale note closest to <paramref name="note"/>. To avoid flickering between two notes when
     /// the voice sits halfway between them, <paramref name="current"/> is kept unless another note is
     /// closer by more than <paramref name="hysteresis"/> semitones.

@@ -18,8 +18,10 @@ pick an output, and hear the result live with low delay.
 - **Equalizer:** ten bands from 31 Hz to 16 kHz, adjustable bandwidth, low cut and high cut filters,
   output gain and a live frequency response curve. Presets: Bass boost, Treble boost, Voice clarity,
   Warm, Telephone, AM radio, Megaphone, Muffled.
-- **Pitch shifter:** ±24 semitones plus fine tuning in cents, adjustable window size and dry/wet mix.
-  It has two algorithms:
+- **Pitch shifter:** up to two octaves up or down. The **Octave** buttons (−2, −1, 0, +1, +2) jump
+  straight to whole octaves, and the **Pitch** slider adds single semitones; its label reads e.g.
+  "+1 octave +3 semitones". There is also fine tuning in cents, an adjustable window size and a
+  dry/wet mix. It has two algorithms:
   - *Low latency (granular)*: shifts the sound in the time domain and aligns each grain to the waveform
     to reduce warble. Delay is about half the window size.
   - *High quality (phase vocoder)*: a phase-locked phase vocoder followed by resampling. It sounds

@@ -84,7 +84,7 @@ public sealed class AutoTuneEffect : AudioEffect
             description: "How much of the distance to the note is corrected."));
         Transpose = AddParameter(EffectParameter.Integer(
             "transpose", "Transpose", -12, 12, 0, "st",
-            formatter: v => v.ToString("+0;-0;0", CultureInfo.CurrentCulture) + " semitones",
+            formatter: v => MusicalScale.FormatInterval((int)MathF.Round(v)),
             description: "Moves the corrected notes up or down."));
         Reference = AddParameter(EffectParameter.Integer(
             "reference", "Tuning (A4)", 430, 450, 440, "Hz",

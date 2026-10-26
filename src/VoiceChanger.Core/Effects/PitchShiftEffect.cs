@@ -32,8 +32,8 @@ public sealed class PitchShiftEffect : AudioEffect
     {
         Semitones = AddParameter(EffectParameter.Integer(
             "semitones", "Pitch", -24, 24, 0, "st",
-            formatter: v => v.ToString("+0;-0;0", CultureInfo.CurrentCulture) + " semitones",
-            description: "Shift in semitones. +12 is one octave up, -12 one octave down."));
+            formatter: v => MusicalScale.FormatInterval((int)MathF.Round(v)),
+            description: "Shift in semitones, up to two octaves either way. 12 semitones make one octave."));
         Cents = AddParameter(EffectParameter.Integer(
             "cents", "Fine tune", -100, 100, 0, "cents",
             formatter: v => v.ToString("+0;-0;0", CultureInfo.CurrentCulture) + " cents",

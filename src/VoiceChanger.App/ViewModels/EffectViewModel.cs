@@ -74,6 +74,7 @@ public abstract partial class EffectViewModel : ObservableObject
     {
         EqualizerEffect equalizer => new EqualizerViewModel(equalizer, description),
         AutoTuneEffect autoTune => new AutoTuneViewModel(autoTune, description),
+        PitchShiftEffect pitchShift => new PitchShiftViewModel(pitchShift, description),
         _ => new GenericEffectViewModel(effect, description),
     };
 
