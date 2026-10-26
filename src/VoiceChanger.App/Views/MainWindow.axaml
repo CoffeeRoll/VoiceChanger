@@ -21,6 +21,9 @@
     <DataTemplate DataType="vm:EqualizerViewModel">
       <views:EqualizerEditor />
     </DataTemplate>
+    <DataTemplate DataType="vm:AutoTuneViewModel">
+      <views:AutoTuneEditor />
+    </DataTemplate>
     <DataTemplate DataType="vm:GenericEffectViewModel">
       <views:GenericEffectEditor />
     </DataTemplate>
@@ -203,7 +206,7 @@
 
               <StackPanel IsVisible="{Binding HasNoEffects}" Spacing="6" Margin="0,40" HorizontalAlignment="Center">
                 <TextBlock Classes="h2" Text="No effects yet" HorizontalAlignment="Center" />
-                <TextBlock Classes="muted" Text="Use “Add effect” to add a pitch shifter or an equalizer." HorizontalAlignment="Center" />
+                <TextBlock Classes="muted" Text="Use “Add effect” to add a pitch shifter, auto tune or an equalizer." HorizontalAlignment="Center" />
               </StackPanel>
             </StackPanel>
           </ScrollViewer>

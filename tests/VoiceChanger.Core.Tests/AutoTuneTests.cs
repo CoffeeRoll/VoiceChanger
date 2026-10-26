@@ -74,12 +74,12 @@ public class PartialPresetTests
         autoTune.Key.Value = 9;
         autoTune.Scale.Value = (int)ScaleType.NaturalMinor;
 
-        autoTune.ApplyPreset(autoTune.Presets.Single(p => p.Name == "Robot (hard tune)"));
+        autoTune.ApplyPreset(autoTune.Presets.Single(p => p.Name == "Hard tune"));
 
         Assert.Equal(0, autoTune.RetuneSpeed.Value);
         Assert.Equal(9, autoTune.Key.Value);
         Assert.Equal((int)ScaleType.NaturalMinor, autoTune.Scale.Value);
-        Assert.Equal("Robot (hard tune)", autoTune.FindMatchingPreset()?.Name);
+        Assert.Equal("Hard tune", autoTune.FindMatchingPreset()?.Name);
     }
 
     [Fact]

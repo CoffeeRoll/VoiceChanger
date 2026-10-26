@@ -93,7 +93,7 @@ public sealed class AutoTuneEffect : AudioEffect
 
         // Styles only touch the correction behaviour and keep the chosen key and scale.
         AddPartialPreset("Pop", ("retune", 20), ("amount", 100), ("transpose", 0));
-        AddPartialPreset("Robot (hard tune)", ("retune", 0), ("amount", 100), ("transpose", 0));
+        AddPartialPreset("Hard tune", ("retune", 0), ("amount", 100), ("transpose", 0));
         AddPartialPreset("Natural", ("retune", 80), ("amount", 100), ("transpose", 0));
         AddPartialPreset("Subtle", ("retune", 150), ("amount", 70), ("transpose", 0));
     }

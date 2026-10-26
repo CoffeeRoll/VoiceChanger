@@ -280,7 +280,10 @@ public sealed class PitchDetector
         _recentCount = Math.Min(3, _recentCount + 1);
         if (_recentCount < 3)
         {
-            Frequency = frequency;
+            // At the start of a note the window still contains part of what came before; only
+            // report a pitch once two estimates agree to within a semitone.
+            bool settled = _recentCount == 2 && Math.Abs(Math.Log2(_recent[2] / _recent[1])) < 1.0 / 12;
+            Frequency = settled ? frequency : 0;
             return;
         }
 

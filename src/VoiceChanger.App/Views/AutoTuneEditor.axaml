@@ -1,0 +1,143 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:VoiceChanger.App.ViewModels"
+             xmlns:views="using:VoiceChanger.App.Views"
+             xmlns:controls="using:VoiceChanger.App.Controls"
+             x:Class="VoiceChanger.App.Views.AutoTuneEditor"
+             x:DataType="vm:AutoTuneViewModel">
+
+  <UserControl.Styles>
+    <Style Selector="Border.readout">
+      <Setter Property="Background" Value="#14171D" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="14,10" />
+    </Style>
+    <Style Selector="TextBlock.caption">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="1" />
+      <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="TextBlock.note">
+      <Setter Property="FontSize" Value="30" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.note.target">
+      <Setter Property="Foreground" Value="#9D86FF" />
+    </Style>
+
+    <!-- Scale strip: notes outside the scale are dim, the target note is filled. -->
+    <Style Selector="Border.chip">
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Margin" Value="2,0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Background" Value="#16191F" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="1.5" />
+    </Style>
+    <Style Selector="Border.chip > TextBlock">
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="Foreground" Value="#4A5162" />
+    </Style>
+    <Style Selector="Border.chip.inScale">
+      <Setter Property="Background" Value="#262B36" />
+    </Style>
+    <Style Selector="Border.chip.inScale > TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Border.chip.input">
+      <Setter Property="BorderBrush" Value="#22D3EE" />
+    </Style>
+    <Style Selector="Border.chip.target">
+      <Setter Property="Background" Value="{StaticResource AccentGradientBrush}" />
+    </Style>
+    <Style Selector="Border.chip.target > TextBlock">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel Spacing="12">
+    <!-- What is being sung and what it is corrected to. -->
+    <Grid ColumnDefinitions="*,Auto,*" ColumnSpacing="10">
+      <Border Classes="readout">
+        <StackPanel Spacing="2">
+          <TextBlock Classes="caption" Text="YOU SING" />
+          <TextBlock x:Name="InputNoteText" Classes="note" Text="{Binding InputNote}" />
+          <TextBlock Classes="muted" Text="{Binding InputDetail}" />
+        </StackPanel>
+      </Border>
+
+      <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4" MinWidth="96">
+        <Path Classes="icon" Data="{StaticResource IconArrowRight}" HorizontalAlignment="Center" Width="20" Height="20" Stretch="Uniform" />
+        <TextBlock Classes="value" Text="{Binding CorrectionText}" HorizontalAlignment="Center" />
+      </StackPanel>
+
+      <Border Grid.Column="2" Classes="readout">
+        <StackPanel Spacing="2">
+          <TextBlock Classes="caption" Text="CORRECTED TO" />
+          <TextBlock x:Name="OutputNoteText" Classes="note target" Text="{Binding OutputNote}" />
+          <TextBlock Classes="muted" Text="{Binding OutputDetail}" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <!-- How far the voice is from the note before correction. -->
+    <StackPanel Spacing="4">
+      <Grid ColumnDefinitions="*,Auto,*">
+        <TextBlock Classes="label" Text="♭ flat" />
+        <TextBlock Grid.Column="1" Classes="label" Text="in tune" />
+        <TextBlock Grid.Column="2" Classes="label" Text="sharp ♯" HorizontalAlignment="Right" />
+      </Grid>
+      <controls:TunerMeter Cents="{Binding TunerCents}" IsActive="{Binding HasPitch}" />
+    </StackPanel>
+
+    <controls:PitchHistoryView Height="180"
+                               InputPitches="{Binding InputHistory}"
+                               OutputPitches="{Binding OutputHistory}"
+                               ScaleMask="{Binding ScaleMask}"
+                               RootPitchClass="{Binding RootPitchClass}" />
+
+    <!-- Notes of the selected key and scale. -->
+    <StackPanel Spacing="6">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Classes="label" Text="Allowed notes" />
+        <TextBlock Grid.Column="1" Classes="value" Text="{Binding ScaleName}" />
+      </Grid>
+      <ItemsControl ItemsSource="{Binding Notes}" Margin="-2,0">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <UniformGrid Rows="1" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:NoteChipViewModel">
+            <Border Classes="chip"
+                    Classes.inScale="{Binding IsInScale}"
+                    Classes.input="{Binding IsInput}"
+                    Classes.target="{Binding IsTarget}">
+              <TextBlock Text="{Binding Name}" />
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+
+    <!-- Settings, two per row. -->
+    <ItemsControl ItemsSource="{Binding Parameters}" Margin="-12,4,-12,0">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <UniformGrid Columns="2" />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:ParameterViewModel">
+          <views:ParameterEditor Margin="12,0,12,6" />
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

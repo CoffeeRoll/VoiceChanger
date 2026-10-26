@@ -211,9 +211,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             IsRunning = false;
             _statusTimer.Stop();
-            InputLevelDb = MeterFloorDb;
-            OutputLevelDb = MeterFloorDb;
-            LatencyText = "–";
+            ClearLiveDisplays();
             ErrorMessage = $"Could not start audio: {ex.Message}";
             StatusText = "Stopped.";
         }
@@ -224,9 +222,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _engine.Stop();
         IsRunning = false;
         _statusTimer.Stop();
-        InputLevelDb = MeterFloorDb;
-        OutputLevelDb = MeterFloorDb;
-        LatencyText = "–";
+        ClearLiveDisplays();
         StatusText = "Stopped.";
         SaveSettings();
     }
@@ -297,16 +293,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             IsRunning = false;
             _statusTimer.Stop();
-            InputLevelDb = MeterFloorDb;
-            OutputLevelDb = MeterFloorDb;
-            LatencyText = "–";
+            ClearLiveDisplays();
             StatusText = "Stopped.";
             ErrorMessage = $"The audio device stopped working: {e.Error?.Message} Check the device and press Start again.";
             RefreshDevices();
         });
     }
 
-    private void UpdateStatus()
+    /// <summary>Refreshes meters, status text and live effect displays (called by a 30 Hz timer while running).</summary>
+    internal void UpdateStatus()
     {
         var status = _engine.GetStatus();
         if (!status.IsRunning)
@@ -328,6 +323,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         StatusText = text;
+        foreach (var effect in Effects)
+        {
+            effect.Tick(isRunning: true);
+        }
+    }
+
+    private void ClearLiveDisplays()
+    {
+        InputLevelDb = MeterFloorDb;
+        OutputLevelDb = MeterFloorDb;
+        LatencyText = "–";
+        foreach (var effect in Effects)
+        {
+            effect.Tick(isRunning: false);
+        }
     }
 
     private static double Meter(double previousDb, float peak)

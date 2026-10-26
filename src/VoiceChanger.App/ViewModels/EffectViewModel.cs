@@ -73,6 +73,7 @@ public abstract partial class EffectViewModel : ObservableObject
     public static EffectViewModel Create(AudioEffect effect, string description) => effect switch
     {
         EqualizerEffect equalizer => new EqualizerViewModel(equalizer, description),
+        AutoTuneEffect autoTune => new AutoTuneViewModel(autoTune, description),
         _ => new GenericEffectViewModel(effect, description),
     };
 
@@ -110,6 +111,14 @@ public abstract partial class EffectViewModel : ObservableObject
         {
             _applyingPreset = false;
         }
+    }
+
+    /// <summary>
+    /// Called about 30 times per second on the UI thread to refresh live displays. When
+    /// <paramref name="isRunning"/> is false the audio engine is stopped and displays should clear.
+    /// </summary>
+    public virtual void Tick(bool isRunning)
+    {
     }
 
     protected virtual void OnParameterChanged(object? sender, EventArgs e)

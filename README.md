@@ -26,6 +26,8 @@ pick an output, and hear the result live with low delay.
     smoother for large shifts and adds more delay.
 
   Presets: Higher voice, Lower voice, Chipmunk, Deep, Monster, Harmony, Detune.
+- **Auto Tune:** detects the pitch of your voice and pulls it to the nearest note of a key and scale.
+  See [Auto Tune](#auto-tune) below.
 - Input and output **level meters**, input gain and output volume.
 - **Remembers your settings**: devices, effects, every effect setting and the latency preset.
 
@@ -49,6 +51,43 @@ Tips:
 - **If you hear crackles or dropouts**, choose a safer latency setting under Output. The status bar
   counts dropouts while audio is running.
 - Settings are saved to `%APPDATA%\VoiceChanger\settings.json`.
+
+## Auto Tune
+
+![Auto Tune card](docs/auto-tune.png)
+
+Add it with **Add effect → Auto Tune**. While audio is running the card shows:
+
+- **You sing / Corrected to:** the note you are singing, its frequency and how many cents it is off,
+  and the note it is being pulled to, with the size of the correction in between.
+- **Tuner:** how far your voice is from the target note, from −50 cents (flat) to +50 cents (sharp).
+  The green zone is within ±10 cents.
+- **Pitch graph:** the last five seconds of your sung pitch (cyan) and the corrected pitch (purple),
+  drawn on note lines. The notes of the selected scale are labelled, and the key's root note is
+  highlighted.
+- **Allowed notes:** the notes of the selected key and scale. The target note is filled in, and the
+  note you are closest to is outlined.
+
+Settings:
+
+| Setting | What it does |
+| --- | --- |
+| Key and Scale | The notes your voice is pulled to. *Chromatic* (default) allows all twelve notes and works with any song. Also available: major, minor, harmonic minor, major/minor pentatonic, blues, Dorian and Mixolydian, in any key. |
+| Retune speed | How fast the pitch moves to the note. *Instant* (0 ms) gives the hard, robotic sound and flattens vibrato. 20–80 ms sounds like a polished vocal. 150 ms and above corrects gently and keeps slides and vibrato. |
+| Correction | How much of the distance to the note is corrected. 100 % lands exactly on the note. |
+| Transpose | Moves the corrected notes up or down by up to an octave. |
+| Tuning (A4) | Reference pitch. Leave it at 440 Hz unless the music is tuned differently (for example 432 Hz). |
+
+The style presets (*Pop*, *Hard tune*, *Natural*, *Subtle*) only change the correction settings and
+keep your key and scale.
+
+Notes:
+
+- Auto Tune is made for a single voice; it can't correct chords or music. Breaths, consonants and
+  silence have no pitch, so it leaves them uncorrected.
+- It adds about 32 ms of delay. Pitch detection needs about that much audio, and the voice is delayed
+  by the same amount so that each correction is applied on time.
+- It usually works best as the first effect, so it hears your natural voice.
 
 ## Getting the app
 
@@ -110,7 +149,7 @@ work on Windows. On other systems the window opens, but the device lists are emp
 | `src/VoiceChanger.Core` | Platform-independent DSP and engine: biquad filters, FFT, resampler, ring buffer, the effects, the effect chain, the audio processor/engine and the settings. |
 | `src/VoiceChanger.Audio.Wasapi` | Windows audio backend built on [NAudio](https://github.com/naudio/NAudio) (WASAPI). |
 | `src/VoiceChanger.App` | The desktop app, built with [Avalonia UI](https://avaloniaui.net/) and CommunityToolkit.Mvvm. |
-| `tests/VoiceChanger.Core.Tests` | Checks the DSP output: filter responses, pitch accuracy and level, resampling, drift compensation with simulated device clocks, and settings. |
+| `tests/VoiceChanger.Core.Tests` | Checks the DSP output: filter responses, pitch shifting and pitch detection accuracy, auto-tune correction, resampling, drift compensation with simulated device clocks, and settings. |
 | `tests/VoiceChanger.App.Tests` | Headless UI tests that load the real window with fake audio devices and render screenshots. |
 
 ### Adding an effect
