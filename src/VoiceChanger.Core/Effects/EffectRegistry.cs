@@ -24,6 +24,11 @@ public sealed class EffectRegistry
             "Makes the voice higher or lower without changing its speed.",
             () => new PitchShiftEffect()));
         registry.Register(new EffectDescriptor(
+            AutoTuneEffect.Type,
+            "Auto Tune",
+            "Pulls the voice to the nearest note of a key and scale.",
+            () => new AutoTuneEffect()));
+        registry.Register(new EffectDescriptor(
             EqualizerEffect.Type,
             "Equalizer",
             "Ten band graphic equalizer with low and high cut filters.",

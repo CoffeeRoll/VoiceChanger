@@ -24,8 +24,7 @@ public sealed class GranularPitchShifter
     private readonly int _maxWindow;
     private readonly int _maxSearch;
     private readonly int _correlationLength;
-    private readonly float[] _reference;
-    private readonly float[] _candidates;
+    private readonly WaveformAligner _aligner;
     private int _write;
     private double _phase;
     private double _delayA;
@@ -42,8 +41,7 @@ public sealed class GranularPitchShifter
         _maxWindow = maxWindowFrames;
         _maxSearch = (int)(SearchSeconds * sampleRate);
         _correlationLength = (int)(CorrelationSeconds * sampleRate);
-        _reference = new float[_correlationLength];
-        _candidates = new float[_maxSearch + _correlationLength + 1];
+        _aligner = new WaveformAligner(_maxSearch, _correlationLength);
 
         int length = (int)System.Numerics.BitOperations.RoundUpToPowerOf2(
             (uint)(maxWindowFrames + _maxSearch + _correlationLength + InterpolationMargin + 8));
@@ -163,81 +161,8 @@ public sealed class GranularPitchShifter
     {
         double baseDelay = ratio > 1 ? InterpolationMargin + _windowFrames : InterpolationMargin;
         int search = SearchFrames;
-        int length = Math.Min(_correlationLength, search);
-        if (search < 2 || length < 8)
-        {
-            return baseDelay;
-        }
-
-        int mask = _mask;
-        int referenceStart = _write - (int)Math.Round(otherDelay);
-        int candidateStart = _write - (int)Math.Round(baseDelay);
-        double referenceEnergy = 0;
-        for (int j = 0; j < length; j++)
-        {
-            float value = _analysis[(referenceStart - j) & mask];
-            _reference[j] = value;
-            referenceEnergy += value * value;
-        }
-
-        if (referenceEnergy < 1e-9)
-        {
-            return baseDelay; // Silence: nothing to align with.
-        }
-
-        for (int j = 0; j <= search + length; j++)
-        {
-            _candidates[j] = _analysis[(candidateStart - j) & mask];
-        }
-
-        double energy = 0;
-        for (int j = 0; j < length; j++)
-        {
-            energy += _candidates[j] * _candidates[j];
-        }
-
-        int best = 0;
-        double bestScore = double.NegativeInfinity;
-        for (int offset = 0; offset <= search; offset++)
-        {
-            double correlation = 0;
-            for (int j = 0; j < length; j++)
-            {
-                correlation += _reference[j] * _candidates[offset + j];
-            }
-
-            double score = correlation / Math.Sqrt(energy + 1e-9);
-            if (score > bestScore)
-            {
-                bestScore = score;
-                best = offset;
-            }
-
-            // Slide the energy window one frame further into the past.
-            float leaving = _candidates[offset];
-            float entering = _candidates[offset + length];
-            energy = Math.Max(0, energy - leaving * leaving + entering * entering);
-        }
-
-        return baseDelay + best;
+        return baseDelay + _aligner.FindOffset(_analysis, _mask, _write, otherDelay, baseDelay, search, Math.Min(_correlationLength, search));
     }
 
-    private float Read(float[] line, double delay)
-    {
-        double position = _write - delay;
-        int index = (int)Math.Floor(position);
-        float t = (float)(position - index);
-        int mask = _mask;
-
-        float xm1 = line[(index - 1) & mask];
-        float x0 = line[index & mask];
-        float x1 = line[(index + 1) & mask];
-        float x2 = line[(index + 2) & mask];
-
-        // Catmull-Rom cubic interpolation.
-        float c1 = 0.5f * (x1 - xm1);
-        float c2 = xm1 - 2.5f * x0 + 2f * x1 - 0.5f * x2;
-        float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
-        return ((c3 * t + c2) * t + c1) * t + x0;
-    }
+    private float Read(float[] line, double delay) => WaveformAligner.ReadCubic(line, _mask, _write, delay);
 }

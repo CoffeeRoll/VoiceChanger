@@ -92,11 +92,7 @@ public abstract partial class EffectViewModel : ObservableObject
         SelectedPreset = FindMatchingPreset();
     }
 
-    /// <summary>The preset whose values equal the current settings, if any.</summary>
-    private EffectPreset? FindMatchingPreset() =>
-        Presets.FirstOrDefault(preset => Effect.Parameters.All(parameter =>
-            parameter.Value.Equals(parameter.Coerce(
-                preset.Values.TryGetValue(parameter.Id, out float value) ? value : parameter.DefaultValue))));
+    private EffectPreset? FindMatchingPreset() => Effect.FindMatchingPreset();
 
     partial void OnSelectedPresetChanged(EffectPreset? value)
     {
@@ -120,7 +116,8 @@ public abstract partial class EffectViewModel : ObservableObject
     {
         if (!_applyingPreset)
         {
-            SelectedPreset = null;
+            // A partial preset (e.g. an auto-tune style) still applies after changing other settings.
+            SelectedPreset = FindMatchingPreset();
         }
     }
 }

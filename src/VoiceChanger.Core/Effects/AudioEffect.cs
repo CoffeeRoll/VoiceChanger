@@ -1,8 +1,17 @@
 namespace VoiceChanger.Core.Effects;
 
-/// <summary>A named set of parameter values. Parameters that are not listed use their defaults.</summary>
-public sealed record EffectPreset(string Name, IReadOnlyDictionary<string, float> Values)
+/// <summary>
+/// A named set of parameter values. Parameters that are not listed go back to their defaults, unless
+/// the preset is <see cref="IsPartial"/>, in which case they keep their current values.
+/// </summary>
+public sealed record EffectPreset(string Name, IReadOnlyDictionary<string, float> Values, bool IsPartial = false)
 {
+    /// <summary>Whether <paramref name="parameters"/> currently hold exactly this preset's values.</summary>
+    public bool Matches(IEnumerable<EffectParameter> parameters) =>
+        parameters.All(p => Values.TryGetValue(p.Id, out float value)
+            ? p.Value.Equals(p.Coerce(value))
+            : IsPartial || p.IsDefault);
+
     public override string ToString() => Name;
 }
 
@@ -78,9 +87,19 @@ public abstract class AudioEffect
         ArgumentNullException.ThrowIfNull(preset);
         foreach (var parameter in _parameters)
         {
-            parameter.Value = preset.Values.TryGetValue(parameter.Id, out float value) ? value : parameter.DefaultValue;
+            if (preset.Values.TryGetValue(parameter.Id, out float value))
+            {
+                parameter.Value = value;
+            }
+            else if (!preset.IsPartial)
+            {
+                parameter.Value = parameter.DefaultValue;
+            }
         }
     }
+
+    /// <summary>The first preset whose values equal the current settings, if any.</summary>
+    public EffectPreset? FindMatchingPreset() => _presets.FirstOrDefault(p => p.Matches(_parameters));
 
     public void ResetParameters()
     {
@@ -146,6 +165,10 @@ public abstract class AudioEffect
 
     protected void AddPreset(string name, params (string Id, float Value)[] values) =>
         _presets.Add(new EffectPreset(name, values.ToDictionary(v => v.Id, v => v.Value, StringComparer.OrdinalIgnoreCase)));
+
+    /// <summary>Adds a preset that only changes the listed parameters and leaves the others alone.</summary>
+    protected void AddPartialPreset(string name, params (string Id, float Value)[] values) =>
+        _presets.Add(new EffectPreset(name, values.ToDictionary(v => v.Id, v => v.Value, StringComparer.OrdinalIgnoreCase), IsPartial: true));
 
     /// <summary>Allocate buffers for <see cref="SampleRate"/> and <see cref="Channels"/>.</summary>
     protected abstract void OnPrepare();
