@@ -195,6 +195,13 @@ public sealed class PsolaPitchShifter
             {
             }
 
+            if (_nextOutput < _written - 1 - _latency - _maxPeriod || _lastMark < _written - 4 * _maxPeriod)
+            {
+                // Grains or marks fell behind (should never happen): rather than going quiet,
+                // start again from what is being played now.
+                Resynchronise();
+            }
+
             // Emit the sample that every grain overlapping it has been added to by now.
             long emit = _written - 1 - _latency;
             int index = (int)(emit & _outputMask);
@@ -205,6 +212,23 @@ public sealed class PsolaPitchShifter
             }
         }
     }
+
+    private void Resynchronise()
+    {
+        long now = _written - 1 - _latency;
+        _markStart = 0;
+        _markCount = 0;
+        _lastMark = now - _unvoicedPeriod;
+        _lastOffset = 0;
+        _lastPeriod = _unvoicedPeriod;
+        _lastVoiced = false;
+        _usedUpTo = long.MinValue;
+        _nextOutput = now + 1;
+        Resyncs++;
+    }
+
+    /// <summary>Number of times the shifter had to start again (for diagnostics; should stay 0).</summary>
+    internal int Resyncs { get; private set; }
 
     /// <summary>
     /// The look-ahead needed for a formant ratio: grains reach up to one period (times the formant
@@ -219,17 +243,13 @@ public sealed class PsolaPitchShifter
     /// <summary>Places the next analysis mark once enough input is there. Returns whether it did.</summary>
     private bool TryFindNextMark()
     {
-        if (_markCount == MaxMarks)
-        {
-            return false;
-        }
-
         if (_lastVoiced)
         {
-            // Follow the voice: the next pulse is about one period on and looks like the last one.
+            // Follow the voice: the next pulse is about one period on and looks like the last one,
+            // within the range of voices the shifter handles.
             int period = _lastPeriod;
-            long low = _lastMark + (int)(MinTrackRatio * period);
-            long high = _lastMark + (int)Math.Ceiling(MaxTrackRatio * period);
+            long low = _lastMark + Math.Max(_minPeriod, (int)(MinTrackRatio * period));
+            long high = _lastMark + Math.Min(_maxPeriod, (int)Math.Ceiling(MaxTrackRatio * period));
             if (_written <= high)
             {
                 return false;
@@ -256,7 +276,7 @@ public sealed class PsolaPitchShifter
                 previous = score;
             }
 
-            if (best >= 0)
+            if (best >= 0 && low < high)
             {
                 // Sub-sample position from a parabola through the correlation peak, so that the
                 // pitch is exact even though marks fall on whole samples.
@@ -302,9 +322,28 @@ public sealed class PsolaPitchShifter
     private void StartVoice(long position, double exactPeriod)
     {
         int period = (int)Math.Round(exactPeriod);
-        long anchor = position - period;
+
+        // The analysed stretch (one longest period) was voiced throughout: unvoiced marks in it that
+        // are not in use yet make way for pulse marks.
+        long start = Math.Max(position - _maxPeriod, _usedUpTo + 1);
+        while (_markCount > 0 && Last.Position >= start && Last.Position > _usedUpTo && !Last.Voiced)
+        {
+            _markCount--;
+        }
+
+        // New marks must come after the ones that stay, at least half a period on.
+        long floor = _markCount > 0 ? Math.Max(start, Last.Position + period / 2) : start;
+        long searchFrom = Math.Max(position - period, floor);
+        if (searchFrom >= position)
+        {
+            // No room for a pulse before this point: carry on and look again a little later.
+            AddMark(Math.Max(position, floor), 0, _unvoicedPeriod, voiced: false);
+            return;
+        }
+
+        long anchor = searchFrom;
         float loudest = -1;
-        for (long p = position - period; p < position; p++)
+        for (long p = searchFrom; p < position; p++)
         {
             float magnitude = Math.Abs(Sample(p));
             if (magnitude > loudest)
@@ -314,14 +353,6 @@ public sealed class PsolaPitchShifter
             }
         }
 
-        // The analysed stretch (one longest period) was voiced throughout.
-        long start = Math.Max(position - _maxPeriod, _usedUpTo + 1);
-        while (_markCount > 0 && Last.Position >= start && Last.Position > _usedUpTo && !Last.Voiced)
-        {
-            _markCount--;
-        }
-
-        long floor = _markCount > 0 ? Math.Max(start, Last.Position + period / 2) : start;
         Span<long> earlier = stackalloc long[16];
         int count = 0;
         long next = anchor;
@@ -463,6 +494,21 @@ public sealed class PsolaPitchShifter
 
     private void AddMark(long position, double offset, double period, bool voiced)
     {
+        // Grain selection relies on marks being in order (should never be needed).
+        if (_markCount > 0 && position <= Last.Position)
+        {
+            position = Last.Position + 1;
+            offset = 0;
+        }
+
+        // A full queue means the output is not keeping up (should never happen): the oldest
+        // mark is the least useful one.
+        if (_markCount == MaxMarks)
+        {
+            _markStart = (_markStart + 1) % MaxMarks;
+            _markCount--;
+        }
+
         _marks[(_markStart + _markCount) % MaxMarks] = new Mark(position, offset, period, voiced);
         _markCount++;
         _lastMark = position;
