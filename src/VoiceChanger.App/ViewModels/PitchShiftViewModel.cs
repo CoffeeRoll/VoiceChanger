@@ -65,9 +65,10 @@ public sealed class PitchShiftViewModel : EffectViewModel
             if (_pitchShift.PreserveFormants.BoolValue)
             {
                 float formantShift = _pitchShift.FormantShift.Value;
+                string method = _pitchShift.VoiceMethod.FormattedValue.ToLower(culture);
                 parts.Add(formantShift == 0
-                    ? "formants kept"
-                    : "formants " + formantShift.ToString("+0.0;-0.0", culture) + " semitones");
+                    ? $"formants kept ({method})"
+                    : "formants " + formantShift.ToString("+0.0;-0.0", culture) + $" semitones ({method})");
             }
 
             if (_pitchShift.Mix.Value < 100)

@@ -85,14 +85,14 @@ public sealed class CollapseTests : IDisposable
         var changes = new List<string?>();
         pitch.PropertyChanged += (_, e) => changes.Add(e.PropertyName);
         pitch.SelectedPreset = pitch.Presets.Single(p => p.Name == "Natural octave up");
-        Assert.Equal("+1 octave · formants kept", pitch.Subtitle);
+        Assert.Equal("+1 octave · formants kept (spectral)", pitch.Subtitle);
         Assert.Contains(nameof(EffectViewModel.Subtitle), changes);
 
         var effect = (Core.Effects.PitchShiftEffect)pitch.Effect;
         effect.FormantShift.Value = -2.5f;
         effect.Cents.Value = 20;
         effect.Mix.Value = 60;
-        Assert.Equal("+1 octave +20 cents · formants -2.5 semitones · 60 % mix", pitch.Subtitle);
+        Assert.Equal("+1 octave +20 cents · formants -2.5 semitones (spectral) · 60 % mix", pitch.Subtitle);
 
         effect.Semitones.Value = 0;
         effect.Cents.Value = 0;

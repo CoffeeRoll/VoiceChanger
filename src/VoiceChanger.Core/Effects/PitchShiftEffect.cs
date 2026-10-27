@@ -12,9 +12,10 @@ namespace VoiceChanger.Core.Effects;
 /// Optionally the formants (the resonances that make a voice recognisable) stay where they are, so a
 /// voice an octave up still sounds like the same person instead of a chipmunk, and an octave down
 /// like a deeper person rather than a slowed-down recording; they can also be moved on their own to
-/// make a voice sound bigger or smaller. This uses a pitch-synchronous voice algorithm
-/// (<see cref="PsolaPitchShifter"/>), which keeps the voice's own high harmonics and leaves breath
-/// noise where it is.
+/// make a voice sound bigger or smaller. This uses one of the voice methods shared by every effect
+/// that shifts a voice (<see cref="VoiceShifterSet"/>): moving each pulse of the voice
+/// (<see cref="PsolaPitchShifter"/>, clearest going down) or rebuilding the spectrum under the
+/// voice's own envelope (<see cref="SpectralVoiceShifter"/>, smoothest going up).
 /// </para>
 /// </summary>
 public sealed class PitchShiftEffect : AudioEffect
@@ -24,14 +25,17 @@ public sealed class PitchShiftEffect : AudioEffect
     public const int GranularMode = 0;
     public const int PhaseVocoderMode = 1;
 
-    /// <summary>The voice algorithm used while formants are preserved (not a choice of <see cref="Mode"/>).</summary>
-    public const int FormantMode = 2;
+    /// <summary>The pulse voice method, used while formants are preserved (not a choice of <see cref="Mode"/>).</summary>
+    public const int VoicePulseMode = 2;
+
+    /// <summary>The spectral voice method, used while formants are preserved (not a choice of <see cref="Mode"/>).</summary>
+    public const int VoiceSpectralMode = 3;
 
     private const float MaxWindowMilliseconds = 100;
     private const float BypassRampSeconds = 0.02f;
 
     private GranularPitchShifter? _granular;
-    private PsolaPitchShifter? _psola;
+    private VoiceShifterSet? _voices;
     private PhaseVocoder[] _vocoders = [];
     private float[] _dry = [];
     private int _mode;
@@ -53,7 +57,9 @@ public sealed class PitchShiftEffect : AudioEffect
             description: "Additional shift in hundredths of a semitone."));
         PreserveFormants = AddParameter(EffectParameter.Toggle(
             "formants", "Preserve formants", false,
-            description: "Keeps the character of your voice when shifting, so it sounds like you singing higher or lower instead of a chipmunk or a slowed-down recording. Uses an algorithm made for voices."));
+            description: "Keeps the character of your voice when shifting, so it sounds like you singing higher or lower instead of a chipmunk or a slowed-down recording. Uses one of the voice methods."));
+        VoiceMethod = AddParameter(VoiceShifterSet.CreateParameter()
+            .AvailableWhen(() => PreserveFormants.BoolValue));
         FormantShift = AddParameter(EffectParameter.Continuous(
             "formantShift", "Formant shift", -12, 12, 0, "st", decimals: 1,
             formatter: v => v.ToString("+0.0;-0.0;0", CultureInfo.CurrentCulture) + " semitones",
@@ -61,11 +67,11 @@ public sealed class PitchShiftEffect : AudioEffect
             .AvailableWhen(() => PreserveFormants.BoolValue));
         Mode = AddParameter(EffectParameter.Choice(
             "mode", "Algorithm", ["Low latency (granular)", "High quality (phase vocoder)"],
-            description: "Granular reacts fastest. The phase vocoder is smoother for big shifts but adds delay. Preserving formants uses its own voice algorithm.")
+            description: "Granular reacts fastest. The phase vocoder is smoother for big shifts but adds delay. While formants are preserved, the voice method applies instead.")
             .AvailableWhen(() => !PreserveFormants.BoolValue));
         WindowMilliseconds = AddParameter(EffectParameter.Continuous(
             "window", "Window size", 10, MaxWindowMilliseconds, 30, "ms", decimals: 0,
-            description: "Analysis window. Longer windows sound smoother, shorter windows react faster. The voice algorithm used to preserve formants follows the pitch of the voice instead.")
+            description: "Analysis window. Longer windows sound smoother, shorter windows react faster. The voice methods used to preserve formants choose their own.")
             .AvailableWhen(() => !PreserveFormants.BoolValue));
         Mix = AddParameter(EffectParameter.Continuous(
             "mix", "Mix", 0, 100, 100, "%", decimals: 0,
@@ -79,10 +85,10 @@ public sealed class PitchShiftEffect : AudioEffect
         AddPreset("Monster", ("semitones", -12), ("window", 60), ("mode", PhaseVocoderMode));
         AddPreset("Harmony (fifth)", ("semitones", 7), ("mix", 50));
         AddPreset("Detune", ("cents", 15), ("mix", 50), ("window", 30));
-        AddPreset("Natural octave up", ("semitones", 12), ("formants", 1));
+        AddPreset("Natural octave up", ("semitones", 12), ("formants", 1), ("method", (int)VoiceShiftMethod.Spectral));
         AddPreset("Natural octave down", ("semitones", -12), ("formants", 1));
         AddPreset("Bigger voice", ("semitones", -3), ("formants", 1), ("formantShift", -3));
-        AddPreset("Smaller voice", ("semitones", 3), ("formants", 1), ("formantShift", 3));
+        AddPreset("Smaller voice", ("semitones", 3), ("formants", 1), ("formantShift", 3), ("method", (int)VoiceShiftMethod.Spectral));
     }
 
     public EffectParameter Semitones { get; }
@@ -90,6 +96,9 @@ public sealed class PitchShiftEffect : AudioEffect
     public EffectParameter Cents { get; }
 
     public EffectParameter PreserveFormants { get; }
+
+    /// <summary>How formants are preserved (a <see cref="VoiceShiftMethod"/>).</summary>
+    public EffectParameter VoiceMethod { get; }
 
     public EffectParameter FormantShift { get; }
 
@@ -105,8 +114,13 @@ public sealed class PitchShiftEffect : AudioEffect
     /// <summary>Formant ratio for the current settings (1 = formants stay where they are).</summary>
     public double FormantRatio => Math.Pow(2, FormantShift.Value / 12.0);
 
-    /// <summary>The algorithm actually used: <see cref="FormantMode"/> while formants are preserved, otherwise the chosen <see cref="Mode"/>.</summary>
-    public int EffectiveMode => PreserveFormants.BoolValue ? FormantMode : Mode.IntValue;
+    /// <summary>
+    /// The algorithm actually used: the voice method (<see cref="VoicePulseMode"/> or
+    /// <see cref="VoiceSpectralMode"/>) while formants are preserved, otherwise the chosen <see cref="Mode"/>.
+    /// </summary>
+    public int EffectiveMode => !PreserveFormants.BoolValue
+        ? Mode.IntValue
+        : (VoiceShiftMethod)VoiceMethod.IntValue == VoiceShiftMethod.Spectral ? VoiceSpectralMode : VoicePulseMode;
 
     /// <summary>Whether the current settings change the sound at all.</summary>
     public bool IsShifting => Ratio != 1 || (PreserveFormants.BoolValue && FormantRatio != 1);
@@ -122,7 +136,8 @@ public sealed class PitchShiftEffect : AudioEffect
 
             return EffectiveMode switch
             {
-                FormantMode => _psola?.LatencyFrames ?? 0,
+                VoicePulseMode => _voices?[VoiceShiftMethod.Pulse].LatencyFrames ?? 0,
+                VoiceSpectralMode => _voices?[VoiceShiftMethod.Spectral].LatencyFrames ?? 0,
                 PhaseVocoderMode => PhaseVocoder.LatencyFor(VocoderFrameSize()),
                 _ => GranularPitchShifter.LatencyFor(WindowFrames(), SampleRate),
             };
@@ -132,7 +147,7 @@ public sealed class PitchShiftEffect : AudioEffect
     protected override void OnPrepare()
     {
         _granular = new GranularPitchShifter(Channels, (int)(MaxWindowMilliseconds / 1000 * SampleRate), SampleRate);
-        _psola = new PsolaPitchShifter(Channels, SampleRate);
+        _voices = new VoiceShifterSet(Channels, SampleRate);
         _vocoders = [];
         _dry = new float[EffectChain.MaxBlockFrames * Channels];
         _rampStep = 1f / (BypassRampSeconds * SampleRate);
@@ -163,17 +178,18 @@ public sealed class PitchShiftEffect : AudioEffect
             vocoder.Ratio = ratio;
         }
 
-        _psola!.Ratio = ratio;
+        _voices!.Ratio = ratio;
         if (formants)
         {
-            _psola.FormantRatio = formantRatio;
+            _voices.FormantRatio = formantRatio;
         }
 
+        _voices.Select((VoiceShiftMethod)VoiceMethod.IntValue);
         if (mode != _mode)
         {
             // Start the newly selected algorithm from silence instead of stale history.
             _granular.Reset();
-            _psola.Reset();
+            _voices.Reset();
             foreach (var vocoder in _vocoders)
             {
                 vocoder.Reset();
@@ -189,7 +205,7 @@ public sealed class PitchShiftEffect : AudioEffect
     protected override void OnReset()
     {
         _granular?.Reset();
-        _psola?.Reset();
+        _voices?.Reset();
         foreach (var vocoder in _vocoders)
         {
             vocoder.Reset();
@@ -210,8 +226,8 @@ public sealed class PitchShiftEffect : AudioEffect
 
         switch (_mode)
         {
-            case FormantMode:
-                _psola!.Process(interleaved);
+            case VoicePulseMode or VoiceSpectralMode:
+                _voices!.Current.Process(interleaved);
                 break;
             case PhaseVocoderMode:
                 for (int ch = 0; ch < _vocoders.Length; ch++)

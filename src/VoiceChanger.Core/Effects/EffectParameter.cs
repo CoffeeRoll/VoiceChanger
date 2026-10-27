@@ -127,6 +127,9 @@ public sealed class EffectParameter
     /// </summary>
     public bool IsAvailable => _availableWhen?.Invoke() ?? true;
 
+    /// <summary>For a choice: show the options side by side as buttons rather than in a list.</summary>
+    public bool ShowAsButtons { get; private set; }
+
     /// <summary>Raised on the thread that changed the value.</summary>
     public event EventHandler? ValueChanged;
 
@@ -179,6 +182,18 @@ public sealed class EffectParameter
     public EffectParameter AvailableWhen(Func<bool> condition)
     {
         _availableWhen = condition ?? throw new ArgumentNullException(nameof(condition));
+        return this;
+    }
+
+    /// <summary>Shows a choice as a row of buttons, for a few short options.</summary>
+    public EffectParameter AsButtons()
+    {
+        if (Kind != ParameterKind.Choice)
+        {
+            throw new InvalidOperationException("Only choices can be shown as buttons.");
+        }
+
+        ShowAsButtons = true;
         return this;
     }
 

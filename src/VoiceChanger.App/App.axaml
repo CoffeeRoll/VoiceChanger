@@ -84,6 +84,9 @@
           <Setter Property="Background" Value="{StaticResource AccentGradientBrush}" />
           <Setter Property="Foreground" Value="White" />
         </Style>
+        <Style Selector="^:disabled">
+          <Setter Property="Opacity" Value="0.45" />
+        </Style>
       </ControlTheme>
     </ResourceDictionary>
   </Application.Resources>

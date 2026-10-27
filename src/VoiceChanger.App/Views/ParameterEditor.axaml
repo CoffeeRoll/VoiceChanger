@@ -3,7 +3,7 @@
              xmlns:vm="using:VoiceChanger.App.ViewModels"
              x:Class="VoiceChanger.App.Views.ParameterEditor"
              x:DataType="vm:ParameterViewModel">
-  <!-- One effect setting: a slider, a list of choices or an on/off switch. -->
+  <!-- One effect setting: a slider, a list of choices, a row of buttons or an on/off switch. -->
   <StackPanel Spacing="2"
               Background="Transparent"
               IsEnabled="{Binding IsAvailable}"
@@ -29,6 +29,27 @@
               SelectedIndex="{Binding SelectedIndex}"
               HorizontalAlignment="Stretch"
               Margin="0,6,0,8" />
+
+    <Border Classes="segmented"
+            IsVisible="{Binding IsButtons}"
+            Margin="0,6,0,8">
+      <ItemsControl ItemsSource="{Binding Options}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <UniformGrid Rows="1" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ChoiceOptionViewModel">
+            <RadioButton Theme="{StaticResource SegmentRadioButton}"
+                         HorizontalAlignment="Stretch"
+                         Padding="8,5"
+                         Content="{Binding Label}"
+                         IsChecked="{Binding IsSelected}" />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </Border>
 
     <ToggleSwitch IsVisible="{Binding IsToggle}"
                   IsChecked="{Binding IsOn}" />

@@ -55,7 +55,8 @@ public sealed class Resampler
 
     /// <summary>
     /// Multiplier applied to the input/output step. Values above 1 consume input faster
-    /// (fewer output frames), values below 1 consume it slower. Must stay close to 1.
+    /// (fewer output frames), values below 1 consume it slower. The anti-aliasing filter is chosen
+    /// for the rates given at construction, so well above 1 the input must already be band-limited.
     /// </summary>
     public double StepAdjustment { get; set; } = 1.0;
 

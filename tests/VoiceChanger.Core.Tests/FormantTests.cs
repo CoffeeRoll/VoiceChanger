@@ -104,25 +104,34 @@ public class FormantTests
     }
 
     /// <summary>A formant-preserving pitch shift, optionally with a formant shift of its own.</summary>
-    private static float[] RunPsola(float[] signal, double ratio, double formantRatio = 1)
+    private static float[] RunVoice(float[] signal, double ratio, double formantRatio = 1, VoiceShiftMethod method = VoiceShiftMethod.Pulse)
     {
-        var shifter = new PsolaPitchShifter(1, SampleRate) { Ratio = ratio, FormantRatio = formantRatio };
+        var shifter = VoiceShifter.Create(method, 1, SampleRate);
+        shifter.Ratio = ratio;
+        shifter.FormantRatio = formantRatio;
         ProcessInBlocks(signal, 1, 480, block => shifter.Process(block.Span));
         return signal;
     }
 
+    private static float[] RunPsola(float[] signal, double ratio, double formantRatio = 1) => RunVoice(signal, ratio, formantRatio);
+
     [Theory]
-    [InlineData(110, 12)]
-    [InlineData(160, -12)]
-    [InlineData(230, 12)]
-    [InlineData(230, -7)]
-    [InlineData(160, 24)]
-    public void Preserving_formants_keeps_the_envelope_in_place(double f0, int semitones)
+    [InlineData(110, 12, VoiceShiftMethod.Pulse)]
+    [InlineData(160, -12, VoiceShiftMethod.Pulse)]
+    [InlineData(230, 12, VoiceShiftMethod.Pulse)]
+    [InlineData(230, -7, VoiceShiftMethod.Pulse)]
+    [InlineData(160, 24, VoiceShiftMethod.Pulse)]
+    [InlineData(110, 12, VoiceShiftMethod.Spectral)]
+    [InlineData(160, -12, VoiceShiftMethod.Spectral)]
+    [InlineData(230, 12, VoiceShiftMethod.Spectral)]
+    [InlineData(230, -7, VoiceShiftMethod.Spectral)]
+    [InlineData(160, 24, VoiceShiftMethod.Spectral)]
+    public void Preserving_formants_keeps_the_envelope_in_place(double f0, int semitones, VoiceShiftMethod method)
     {
         double ratio = Math.Pow(2, semitones / 12.0);
 
         var shifted = RunVocoder(Vowel(f0, 2), ratio);
-        var preserved = RunPsola(Vowel(f0, 2), ratio);
+        var preserved = RunVoice(Vowel(f0, 2), ratio, method: method);
 
         // Without preservation the envelope moves with the pitch...
         Assert.InRange(EnvelopeError(shifted, f0 * ratio, f => Envelope(f / ratio)), 0, 1);
@@ -167,12 +176,14 @@ public class FormantTests
     }
 
     [Theory]
-    [InlineData(4)]
-    [InlineData(-4)]
-    public void Formant_shift_moves_the_envelope_but_not_the_pitch(double formantSemitones)
+    [InlineData(4, VoiceShiftMethod.Pulse)]
+    [InlineData(-4, VoiceShiftMethod.Pulse)]
+    [InlineData(4, VoiceShiftMethod.Spectral)]
+    [InlineData(-4, VoiceShiftMethod.Spectral)]
+    public void Formant_shift_moves_the_envelope_but_not_the_pitch(double formantSemitones, VoiceShiftMethod method)
     {
         double formantRatio = Math.Pow(2, formantSemitones / 12);
-        var output = RunPsola(Vowel(160, 2), 1, formantRatio);
+        var output = RunVoice(Vowel(160, 2), 1, formantRatio, method);
 
         Assert.InRange(EnvelopeError(output, 160, f => Envelope(f / formantRatio)), 0, 2);
         Assert.True(EnvelopeError(output, 160, Envelope) > 2.5);
@@ -253,19 +264,53 @@ public class FormantTests
         int granularLatency = effect.LatencyFrames;
 
         effect.PreserveFormants.Value = 1;
-        Assert.Equal(PitchShiftEffect.FormantMode, effect.EffectiveMode);
+        Assert.Equal(PitchShiftEffect.VoicePulseMode, effect.EffectiveMode);
         Assert.Equal(new PsolaPitchShifter(1, SampleRate).LatencyFrames, effect.LatencyFrames);
         Assert.InRange(effect.LatencyFrames * 1000.0 / SampleRate, 25, 40);
         Assert.True(effect.LatencyFrames > granularLatency);
 
-        // The algorithm choice and window no longer apply, the formant shift now does.
+        // The algorithm choice and window no longer apply, the voice method and formant shift now do.
         Assert.False(effect.Mode.IsAvailable);
         Assert.False(effect.WindowMilliseconds.IsAvailable);
         Assert.True(effect.FormantShift.IsAvailable);
+        Assert.True(effect.VoiceMethod.IsAvailable);
+
+        effect.VoiceMethod.Value = (int)VoiceShiftMethod.Spectral;
+        Assert.Equal(PitchShiftEffect.VoiceSpectralMode, effect.EffectiveMode);
+        Assert.Equal(new SpectralVoiceShifter(1, SampleRate).LatencyFrames, effect.LatencyFrames);
+        Assert.InRange(effect.LatencyFrames * 1000.0 / SampleRate, 30, 45);
+
         effect.PreserveFormants.Value = 0;
+        Assert.Equal(PitchShiftEffect.GranularMode, effect.EffectiveMode);
         Assert.True(effect.Mode.IsAvailable);
         Assert.True(effect.WindowMilliseconds.IsAvailable);
         Assert.False(effect.FormantShift.IsAvailable);
+        Assert.False(effect.VoiceMethod.IsAvailable);
+    }
+
+    [Theory]
+    [InlineData(VoiceShiftMethod.Pulse)]
+    [InlineData(VoiceShiftMethod.Spectral)]
+    public void Effect_shifts_with_either_voice_method(VoiceShiftMethod method)
+    {
+        var effect = new PitchShiftEffect();
+        effect.Semitones.Value = 7;
+        effect.PreserveFormants.Value = 1;
+        effect.VoiceMethod.Value = (int)method;
+        effect.Prepare(SampleRate, 2);
+
+        var signal = new float[SampleRate * 2 * 2];
+        var vowel = Vowel(160, 2);
+        for (int i = 0; i < vowel.Length; i++)
+        {
+            signal[2 * i] = signal[2 * i + 1] = vowel[i];
+        }
+
+        ProcessInBlocks(signal, 2, 480, block => effect.Process(block.Span));
+        var left = Channel(signal, 2, 0);
+        Assert.Equal(left, Channel(signal, 2, 1));
+        Assert.Equal(160 * Math.Pow(2, 7 / 12.0), Pitch(left), 160 * Math.Pow(2, 7 / 12.0) * 0.01);
+        Assert.InRange(EnvelopeError(left, 160 * Math.Pow(2, 7 / 12.0), Envelope), 0, 3.5);
     }
 
     [Fact]
@@ -301,6 +346,11 @@ public class FormantTests
         Assert.Equal(12, effect.Semitones.Value);
         Assert.True(effect.PreserveFormants.BoolValue);
 
+        // Going up sounds smoothest rebuilt from the spectrum, going down clearest moving pulses.
+        Assert.Equal((int)VoiceShiftMethod.Spectral, effect.VoiceMethod.IntValue);
+        effect.ApplyPreset(effect.Presets.Single(p => p.Name == "Smaller voice"));
+        Assert.Equal((int)VoiceShiftMethod.Spectral, effect.VoiceMethod.IntValue);
+
         effect.ApplyPreset(effect.Presets.Single(p => p.Name == "Chipmunk"));
         Assert.False(effect.PreserveFormants.BoolValue);
 
@@ -309,11 +359,12 @@ public class FormantTests
         Assert.Equal("Bigger voice", effect.FindMatchingPreset()?.Name);
 
         // Voices that are simply lower keep sounding like a person, not a slowed-down recording.
-        foreach (string name in new[] { "Lower voice", "Deep", "Natural octave down" })
+        foreach (string name in new[] { "Lower voice", "Deep", "Natural octave down", "Bigger voice" })
         {
             effect.ApplyPreset(effect.Presets.Single(p => p.Name == name));
             Assert.True(effect.Semitones.Value < 0);
             Assert.True(effect.PreserveFormants.BoolValue, name);
+            Assert.Equal((int)VoiceShiftMethod.Pulse, effect.VoiceMethod.IntValue);
         }
 
         effect.ApplyPreset(effect.Presets.Single(p => p.Name == "Monster"));

@@ -5,12 +5,35 @@ using VoiceChanger.Core.Effects;
 
 namespace VoiceChanger.App.ViewModels;
 
-/// <summary>Binds one <see cref="EffectParameter"/> to a slider, combo box or switch.</summary>
+/// <summary>One option of a choice shown as a row of buttons.</summary>
+public sealed class ChoiceOptionViewModel(EffectParameter parameter, int index) : ObservableObject
+{
+    public string Label => parameter.Choices[index];
+
+    public bool IsSelected
+    {
+        get => parameter.IntValue == index;
+        set
+        {
+            if (value)
+            {
+                parameter.Value = index;
+            }
+        }
+    }
+
+    internal void Refresh() => OnPropertyChanged(nameof(IsSelected));
+}
+
+/// <summary>Binds one <see cref="EffectParameter"/> to a slider, combo box, row of buttons or switch.</summary>
 public sealed partial class ParameterViewModel : ObservableObject
 {
     public ParameterViewModel(EffectParameter parameter)
     {
         Parameter = parameter;
+        Options = IsButtons
+            ? Enumerable.Range(0, parameter.Choices.Count).Select(i => new ChoiceOptionViewModel(parameter, i)).ToList()
+            : [];
         parameter.ValueChanged += OnValueChanged;
     }
 
@@ -22,11 +45,16 @@ public sealed partial class ParameterViewModel : ObservableObject
 
     public bool IsSlider => Parameter.Kind is ParameterKind.Continuous or ParameterKind.Integer;
 
-    public bool IsChoice => Parameter.Kind == ParameterKind.Choice;
+    public bool IsChoice => Parameter.Kind == ParameterKind.Choice && !Parameter.ShowAsButtons;
+
+    public bool IsButtons => Parameter.Kind == ParameterKind.Choice && Parameter.ShowAsButtons;
 
     public bool IsToggle => Parameter.Kind == ParameterKind.Toggle;
 
     public IReadOnlyList<string> Choices => Parameter.Choices;
+
+    /// <summary>The options of a choice shown as buttons (empty otherwise).</summary>
+    public IReadOnlyList<ChoiceOptionViewModel> Options { get; }
 
     /// <summary>Slider position from 0 to 1 (logarithmic for frequencies).</summary>
     public double Position
@@ -96,6 +124,11 @@ public sealed partial class ParameterViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedIndex));
         OnPropertyChanged(nameof(IsOn));
         OnPropertyChanged(nameof(DisplayValue));
+        foreach (var option in Options)
+        {
+            option.Refresh();
+        }
+
         Changed?.Invoke(this, EventArgs.Empty);
     }
 }

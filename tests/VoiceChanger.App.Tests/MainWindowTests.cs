@@ -1,5 +1,7 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Input;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -263,6 +265,44 @@ public sealed class MainWindowTests : IDisposable
         formants.IsOn = false;
         Dispatcher.UIThread.RunJobs();
         Assert.False(EditorFor(formantShift).GetVisualDescendants().OfType<Slider>().Single().IsEffectivelyEnabled);
+
+        window.Close();
+        vm.Dispose();
+    }
+
+    [AvaloniaFact]
+    public void Voice_method_is_a_toggle_that_applies_while_formants_are_preserved()
+    {
+        var (window, vm) = Show(new MainWindowViewModel(new FakeAudioBackend(), Store()));
+        var pitch = vm.Effects.OfType<PitchShiftViewModel>().Single();
+        var effect = (PitchShiftEffect)pitch.Effect;
+        var method = pitch.Parameters.Single(p => p.Parameter.Id == "method");
+        var buttons = window.GetVisualDescendants().OfType<ParameterEditor>().Single(e => e.DataContext == method)
+            .GetVisualDescendants().OfType<RadioButton>().ToList();
+
+        Assert.True(method.IsButtons);
+        Assert.False(method.IsChoice);
+        Assert.Equal(["Pulse", "Spectral"], buttons.Select(b => b.Content));
+        Assert.True(buttons[0].IsChecked);
+        Assert.All(buttons, b => Assert.False(b.IsEffectivelyEnabled));
+
+        pitch.Parameters.Single(p => p.Parameter.Id == "formants").IsOn = true;
+        Dispatcher.UIThread.RunJobs();
+        Assert.All(buttons, b => Assert.True(b.IsEffectivelyEnabled));
+
+        // Clicking the other half switches the method; only one half is ever lit.
+        var centre = buttons[1].TranslatePoint(new Point(buttons[1].Bounds.Width / 2, buttons[1].Bounds.Height / 2), window)!.Value;
+        window.MouseDown(centre, MouseButton.Left);
+        window.MouseUp(centre, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(PitchShiftEffect.VoiceSpectralMode, effect.EffectiveMode);
+        Assert.Equal([false, true], buttons.Select(b => b.IsChecked == true));
+
+        // Presets set it too.
+        pitch.SelectedPreset = pitch.Presets.Single(p => p.Name == "Natural octave down");
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(PitchShiftEffect.VoicePulseMode, effect.EffectiveMode);
+        Assert.Equal([true, false], buttons.Select(b => b.IsChecked == true));
 
         window.Close();
         vm.Dispose();

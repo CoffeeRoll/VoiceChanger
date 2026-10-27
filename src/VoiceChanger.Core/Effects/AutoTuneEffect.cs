@@ -24,10 +24,12 @@ public readonly record struct AutoTuneReading(
 /// Pitch correction: bends the voice to the nearest note of a key and scale. A fast retune speed
 /// gives the hard, robotic "auto-tune" sound; a slower one corrects gently and keeps natural vibrato.
 /// <para>
-/// It runs on the voice algorithm of the pitch shifter (<see cref="PsolaPitchShifter"/>), which
-/// measures the period of every glottal pulse it moves. Each pulse is corrected from its own
-/// period, so corrections land exactly on time without a separate pitch detector, a hard tune
-/// comes out exactly on the note, and transposing keeps the character (formants) of the voice.
+/// It runs on the voice methods of the pitch shifter (<see cref="VoiceShifterSet"/>), so
+/// transposing keeps the character (formants) of the voice. The pulse method
+/// (<see cref="PsolaPitchShifter"/>) measures the period of every glottal pulse it moves and
+/// corrects each pulse from its own period, so corrections land exactly on time and a hard tune
+/// comes out exactly on the note. The spectral method (<see cref="SpectralVoiceShifter"/>) corrects
+/// every few milliseconds from a pitch detector lined up with what it is shifting.
 /// </para>
 /// </summary>
 public sealed class AutoTuneEffect : AudioEffect
@@ -43,7 +45,7 @@ public sealed class AutoTuneEffect : AudioEffect
     private const int DisplayPeriods = 4;
 
     private readonly double[] _recentPeriods = new double[DisplayPeriods];
-    private PsolaPitchShifter? _shifter;
+    private VoiceShifterSet? _voices;
 
     // Settings, refreshed in OnParametersChanged.
     private int _mask = 0xFFF;
@@ -96,6 +98,7 @@ public sealed class AutoTuneEffect : AudioEffect
             "transpose", "Transpose", -12, 12, 0, "st",
             formatter: v => MusicalScale.FormatInterval((int)MathF.Round(v)),
             description: "Moves the corrected notes up or down. Your voice keeps its character, like with the pitch shifter's Preserve formants."));
+        VoiceMethod = AddParameter(VoiceShifterSet.CreateParameter());
         Reference = AddParameter(EffectParameter.Integer(
             "reference", "Tuning (A4)", 430, 450, 440, "Hz",
             formatter: v => v.ToString("0", CultureInfo.CurrentCulture) + " Hz",
@@ -120,6 +123,9 @@ public sealed class AutoTuneEffect : AudioEffect
     public EffectParameter Amount { get; }
 
     public EffectParameter Transpose { get; }
+
+    /// <summary>How the voice is shifted (a <see cref="VoiceShiftMethod"/>).</summary>
+    public EffectParameter VoiceMethod { get; }
 
     public EffectParameter Reference { get; }
 
@@ -146,7 +152,7 @@ public sealed class AutoTuneEffect : AudioEffect
         return true;
     }
 
-    public override int LatencyFrames => _shifter?.LatencyFrames ?? 0;
+    public override int LatencyFrames => _voices?[(VoiceShiftMethod)VoiceMethod.IntValue].LatencyFrames ?? 0;
 
     /// <summary>The most recent analysis. Safe to call from any thread.</summary>
     public AutoTuneReading Reading
@@ -173,7 +179,7 @@ public sealed class AutoTuneEffect : AudioEffect
     }
 
     protected override void OnPrepare() =>
-        _shifter = new PsolaPitchShifter(Channels, SampleRate) { Correction = Correct };
+        _voices = new VoiceShifterSet(Channels, SampleRate, Correct);
 
     protected override void OnParametersChanged()
     {
@@ -184,6 +190,12 @@ public sealed class AutoTuneEffect : AudioEffect
             _mask = mask;
         }
 
+        if (_voices!.Select((VoiceShiftMethod)VoiceMethod.IntValue))
+        {
+            // The new shifter keeps its own time, from zero.
+            _lastGrainTime = double.NaN;
+        }
+
         _retuneSeconds = RetuneSpeed.Value / 1000.0;
         _amount = Amount.Value / 100.0;
         _transpose = Transpose.IntValue;
@@ -192,7 +204,7 @@ public sealed class AutoTuneEffect : AudioEffect
 
     protected override void OnReset()
     {
-        _shifter?.Reset();
+        _voices?.Reset();
         _heldTarget = null;
         _tuning = 0;
         _applied = _transpose;
@@ -204,14 +216,14 @@ public sealed class AutoTuneEffect : AudioEffect
 
     protected override void ProcessCore(Span<float> interleaved)
     {
-        _shifter!.Process(interleaved);
+        _voices!.Current.Process(interleaved);
         Publish();
     }
 
-    /// <summary>Chooses the pitch of one grain (one pulse of the voice, or a slice of unvoiced audio).</summary>
+    /// <summary>Chooses the pitch from here on: for one pulse of the voice (or a slice of unvoiced audio), or one frame.</summary>
     private double Correct(double period, double time)
     {
-        double seconds = double.IsNaN(_lastGrainTime) ? 0 : (time - _lastGrainTime) / SampleRate;
+        double seconds = double.IsNaN(_lastGrainTime) ? 0 : Math.Max(0, time - _lastGrainTime) / SampleRate;
         _lastGrainTime = time;
         _voiced = period > 0;
         if (_voiced)
