@@ -12,6 +12,9 @@ public enum ScaleType
     Blues,
     Dorian,
     Mixolydian,
+
+    /// <summary>Notes picked one by one (see <see cref="Effects.AutoTuneEffect.CustomNotes"/>).</summary>
+    Custom,
 }
 
 /// <summary>Note, frequency and scale helpers. Notes are MIDI numbers: 60 is middle C (C4), 69 is A4.</summary>
@@ -20,7 +23,7 @@ public static class MusicalScale
     public static IReadOnlyList<string> NoteNames { get; } = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
     public static IReadOnlyList<string> ScaleNames { get; } =
-        ["Chromatic", "Major", "Minor", "Harmonic minor", "Major pentatonic", "Minor pentatonic", "Blues", "Dorian", "Mixolydian"];
+        ["Chromatic", "Major", "Minor", "Harmonic minor", "Major pentatonic", "Minor pentatonic", "Blues", "Dorian", "Mixolydian", "Custom"];
 
     public static double FrequencyToNote(double frequency, double referenceA4 = 440) =>
         69 + 12 * Math.Log2(frequency / referenceA4);
@@ -34,9 +37,14 @@ public static class MusicalScale
     /// <summary>Name with octave, e.g. "A4" or "C#3".</summary>
     public static string NoteName(int note) => NoteNames[PitchClass(note)] + (int)Math.Floor(note / 12.0 - 1);
 
-    /// <summary>Bit mask of the pitch classes in a scale (bit 0 = C).</summary>
+    /// <summary>Bit mask of the pitch classes in a scale (bit 0 = C). Custom scales have no fixed notes.</summary>
     public static int ScaleMask(ScaleType scale, int root)
     {
+        if (scale == ScaleType.Custom)
+        {
+            throw new ArgumentException("A custom scale has no fixed notes.", nameof(scale));
+        }
+
         int[] steps = scale switch
         {
             ScaleType.Chromatic => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
@@ -61,6 +69,13 @@ public static class MusicalScale
     }
 
     public static bool IsInScale(int note, int mask) => (mask & (1 << PitchClass(note))) != 0;
+
+    /// <summary>The note names in a mask, e.g. "C D E G A".</summary>
+    public static string FormatNotes(int mask) =>
+        string.Join(" ", Enumerable.Range(0, 12).Where(pc => (mask & (1 << pc)) != 0).Select(pc => NoteNames[pc]));
+
+    /// <summary>Number of notes in a mask.</summary>
+    public static int CountNotes(int mask) => System.Numerics.BitOperations.PopCount((uint)(mask & 0xFFF));
 
     /// <summary>
     /// Describes a shift in whole octaves plus the remaining semitones, e.g. "+1 octave",

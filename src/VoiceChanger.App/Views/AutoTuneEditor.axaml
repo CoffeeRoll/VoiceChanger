@@ -27,34 +27,42 @@
       <Setter Property="Foreground" Value="#9D86FF" />
     </Style>
 
-    <!-- Scale strip: notes outside the scale are dim, the target note is filled. -->
-    <Style Selector="Border.chip">
+    <!-- Scale strip: notes outside the scale are dim, the target note is filled. Click a note to toggle it. -->
+    <Style Selector="Button.chip">
       <Setter Property="Height" Value="28" />
       <Setter Property="Margin" Value="2,0" />
+      <Setter Property="Padding" Value="0" />
       <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="FontSize" Value="11" />
       <Setter Property="Background" Value="#16191F" />
+      <Setter Property="Foreground" Value="#4A5162" />
       <Setter Property="BorderBrush" Value="Transparent" />
       <Setter Property="BorderThickness" Value="1.5" />
+      <Setter Property="Cursor" Value="Hand" />
     </Style>
-    <Style Selector="Border.chip > TextBlock">
-      <Setter Property="HorizontalAlignment" Value="Center" />
-      <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="FontSize" Value="11" />
-      <Setter Property="Foreground" Value="#4A5162" />
+    <Style Selector="Button.chip /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{Binding $parent[Button].Background}" />
+      <Setter Property="BorderBrush" Value="{Binding $parent[Button].BorderBrush}" />
+      <Setter Property="Foreground" Value="{Binding $parent[Button].Foreground}" />
     </Style>
-    <Style Selector="Border.chip.inScale">
+    <Style Selector="Button.chip:pointerover">
+      <Setter Property="Background" Value="#1F232C" />
+    </Style>
+    <Style Selector="Button.chip.inScale">
       <Setter Property="Background" Value="#262B36" />
-    </Style>
-    <Style Selector="Border.chip.inScale > TextBlock">
       <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
     </Style>
-    <Style Selector="Border.chip.input">
+    <Style Selector="Button.chip.inScale:pointerover">
+      <Setter Property="Background" Value="#303644" />
+    </Style>
+    <Style Selector="Button.chip.input">
       <Setter Property="BorderBrush" Value="#22D3EE" />
     </Style>
-    <Style Selector="Border.chip.target">
+    <Style Selector="Button.chip.target, Button.chip.target:pointerover">
       <Setter Property="Background" Value="{StaticResource AccentGradientBrush}" />
-    </Style>
-    <Style Selector="Border.chip.target > TextBlock">
       <Setter Property="Foreground" Value="White" />
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
@@ -101,11 +109,12 @@
                                ScaleMask="{Binding ScaleMask}"
                                RootPitchClass="{Binding RootPitchClass}" />
 
-    <!-- Notes of the selected key and scale. -->
+    <!-- Notes of the selected key and scale; clicking one makes a custom scale. -->
     <StackPanel Spacing="6">
-      <Grid ColumnDefinitions="*,Auto">
+      <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
         <TextBlock Classes="label" Text="Allowed notes" />
-        <TextBlock Grid.Column="1" Classes="value" Text="{Binding ScaleName}" />
+        <TextBlock Grid.Column="1" Classes="label" Opacity="0.7" Text="click a note to add or remove it" TextTrimming="CharacterEllipsis" />
+        <TextBlock x:Name="ScaleNameText" Grid.Column="2" Classes="value" Text="{Binding ScaleName}" />
       </Grid>
       <ItemsControl ItemsSource="{Binding Notes}" Margin="-2,0">
         <ItemsControl.ItemsPanel>
@@ -115,19 +124,20 @@
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:NoteChipViewModel">
-            <Border Classes="chip"
+            <Button Classes="chip"
                     Classes.inScale="{Binding IsInScale}"
                     Classes.input="{Binding IsInput}"
-                    Classes.target="{Binding IsTarget}">
-              <TextBlock Text="{Binding Name}" />
-            </Border>
+                    Classes.target="{Binding IsTarget}"
+                    Content="{Binding Name}"
+                    Command="{Binding ToggleCommand}"
+                    ToolTip.Tip="{Binding ToolTip}" />
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
     </StackPanel>
 
     <!-- Settings, two per row. -->
-    <ItemsControl ItemsSource="{Binding Parameters}" Margin="-12,4,-12,0">
+    <ItemsControl ItemsSource="{Binding Settings}" Margin="-12,4,-12,0">
       <ItemsControl.ItemsPanel>
         <ItemsPanelTemplate>
           <UniformGrid Columns="2" />

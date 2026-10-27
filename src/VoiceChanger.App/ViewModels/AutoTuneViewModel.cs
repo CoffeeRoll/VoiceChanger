@@ -1,17 +1,27 @@
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using VoiceChanger.Core.Dsp;
 using VoiceChanger.Core.Effects;
 
 namespace VoiceChanger.App.ViewModels;
 
-/// <summary>One of the twelve notes in the scale strip.</summary>
-public sealed partial class NoteChipViewModel(string name) : ObservableObject
+/// <summary>One of the twelve notes in the scale strip. Clicking it adds it to the allowed notes or removes it.</summary>
+public sealed partial class NoteChipViewModel(int pitchClass, IRelayCommand toggle) : ObservableObject
 {
-    public string Name { get; } = name;
+    public int PitchClass { get; } = pitchClass;
+
+    public string Name => MusicalScale.NoteNames[PitchClass];
+
+    public IRelayCommand ToggleCommand { get; } = toggle;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ToolTip))]
     public partial bool IsInScale { get; set; }
+
+    public string ToolTip => IsInScale
+        ? $"{Name} is allowed. Click to leave it out."
+        : $"{Name} is left out. Click to allow it.";
 
     /// <summary>The note the voice is being corrected to.</summary>
     [ObservableProperty]
@@ -40,12 +50,18 @@ public sealed partial class AutoTuneViewModel : EffectViewModel
         : base(autoTune, description)
     {
         _autoTune = autoTune;
-        Notes = MusicalScale.NoteNames.Select(n => new NoteChipViewModel(n)).ToList();
+        Notes = Enumerable.Range(0, 12)
+            .Select(pc => new NoteChipViewModel(pc, new RelayCommand(() => _autoTune.ToggleNote(pc))))
+            .ToList();
+        Settings = Parameters.Where(p => p.Parameter != autoTune.CustomNotes).ToList();
         UpdateScale();
         Clear("Press Start to see the pitch of your voice.");
     }
 
     public IReadOnlyList<NoteChipViewModel> Notes { get; }
+
+    /// <summary>The settings shown as controls (the custom notes are picked on the note strip instead).</summary>
+    public IReadOnlyList<ParameterViewModel> Settings { get; }
 
     /// <summary>Scale and retune speed; while singing also the live note, e.g. "A3 → A3 · A minor · instant retune".</summary>
     public override string Summary
@@ -58,7 +74,12 @@ public sealed partial class AutoTuneViewModel : EffectViewModel
                 parts.Add($"{InputNote} → {OutputNote}");
             }
 
-            parts.Add(RootPitchClass < 0 ? "Chromatic" : ScaleName);
+            parts.Add((ScaleType)_autoTune.Scale.IntValue switch
+            {
+                ScaleType.Chromatic => "Chromatic",
+                ScaleType.Custom => $"custom scale ({MusicalScale.CountNotes(ScaleMask)} notes)",
+                _ => ScaleName,
+            });
             parts.Add(_autoTune.RetuneSpeed.Value <= 0 ? "instant retune" : _autoTune.RetuneSpeed.FormattedValue + " retune");
             if (_autoTune.Transpose.IntValue != 0)
             {
@@ -215,12 +236,17 @@ public sealed partial class AutoTuneViewModel : EffectViewModel
     private void UpdateScale()
     {
         int mask = _autoTune.ScaleMask;
-        bool chromatic = (ScaleType)_autoTune.Scale.IntValue == ScaleType.Chromatic;
+        var scale = (ScaleType)_autoTune.Scale.IntValue;
         ScaleMask = mask;
-        RootPitchClass = chromatic ? -1 : _autoTune.Key.IntValue;
-        ScaleName = chromatic
-            ? "Chromatic (all notes)"
-            : $"{MusicalScale.NoteNames[_autoTune.Key.IntValue]} {MusicalScale.ScaleNames[_autoTune.Scale.IntValue].ToLowerInvariant()}";
+
+        // Chromatic and custom scales have no key, so no root note to highlight.
+        RootPitchClass = scale is ScaleType.Chromatic or ScaleType.Custom ? -1 : _autoTune.Key.IntValue;
+        ScaleName = scale switch
+        {
+            ScaleType.Chromatic => "Chromatic (all notes)",
+            ScaleType.Custom => "Custom: " + MusicalScale.FormatNotes(mask),
+            _ => $"{MusicalScale.NoteNames[_autoTune.Key.IntValue]} {MusicalScale.ScaleNames[_autoTune.Scale.IntValue].ToLowerInvariant()}",
+        };
         for (int i = 0; i < Notes.Count; i++)
         {
             Notes[i].IsInScale = MusicalScale.IsInScale(i, mask);

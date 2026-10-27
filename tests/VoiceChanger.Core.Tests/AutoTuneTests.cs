@@ -160,6 +160,59 @@ public class AutoTuneEffectTests
         Assert.InRange(Cents(DominantFrequency(output.AsSpan(SampleRate / 2), SampleRate), expected), -3, 3);
     }
 
+    [Theory]
+    [InlineData(300, 329.63)] // D4 +37 cents: no D in C-E-G, E is closer than C
+    [InlineData(285, 261.63)] // C#4 +48 cents: C is closer than E
+    [InlineData(370, 392.00)] // F#4 +2 cents: only G is near
+    public void Custom_notes_are_the_only_targets(double sung, double expected)
+    {
+        int cMajorTriad = (1 << 0) | (1 << 4) | (1 << 7);
+        var (effect, output) = Run(_ => sung, 1.2, e =>
+        {
+            e.Scale.Value = (int)ScaleType.Custom;
+            e.CustomNotes.Value = cMajorTriad;
+        });
+
+        Assert.Equal(cMajorTriad, effect.ScaleMask);
+        Assert.Equal("C E G", effect.CustomNotes.FormattedValue);
+        Assert.InRange(Cents(DominantFrequency(output.AsSpan(SampleRate / 2), SampleRate), expected), -3, 3);
+    }
+
+    [Fact]
+    public void Toggling_a_note_starts_a_custom_scale_from_the_current_one()
+    {
+        var effect = new AutoTuneEffect();
+        effect.Key.Value = 9;
+        effect.Scale.Value = (int)ScaleType.NaturalMinor;
+        int aMinor = MusicalScale.ScaleMask(ScaleType.NaturalMinor, 9);
+
+        // Adding G# to A minor gives the notes of A harmonic minor plus G.
+        Assert.True(effect.ToggleNote(8));
+        Assert.Equal((int)ScaleType.Custom, effect.Scale.Value);
+        Assert.Equal(aMinor | (1 << 8), effect.ScaleMask);
+        Assert.Equal("C D E F G G# A B", effect.CustomNotes.FormattedValue);
+
+        // ...and then G again leaves exactly A harmonic minor.
+        Assert.True(effect.ToggleNote(7));
+        Assert.Equal(MusicalScale.ScaleMask(ScaleType.HarmonicMinor, 9), effect.ScaleMask);
+
+        // The key only matters for the named scales.
+        Assert.False(effect.Key.IsAvailable);
+        Assert.True(effect.CustomNotes.IsAvailable);
+        effect.Scale.Value = (int)ScaleType.Chromatic;
+        Assert.False(effect.Key.IsAvailable);
+        Assert.False(effect.CustomNotes.IsAvailable);
+        effect.Scale.Value = (int)ScaleType.Major;
+        Assert.True(effect.Key.IsAvailable);
+
+        // Choosing Custom again brings back the picked notes; the last note can't be removed.
+        effect.Scale.Value = (int)ScaleType.Custom;
+        Assert.Equal(MusicalScale.ScaleMask(ScaleType.HarmonicMinor, 9), effect.ScaleMask);
+        effect.CustomNotes.Value = 1 << 2;
+        Assert.False(effect.ToggleNote(2));
+        Assert.Equal(1 << 2, effect.ScaleMask);
+    }
+
     [Fact]
     public void Amount_transpose_and_reference_change_the_target()
     {

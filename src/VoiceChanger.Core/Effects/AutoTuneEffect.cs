@@ -29,6 +29,9 @@ public sealed class AutoTuneEffect : AudioEffect
 {
     public const string Type = "auto-tune";
 
+    /// <summary>C major: the custom scale starts from these notes until others are picked.</summary>
+    public const int DefaultCustomNotes = 0b1010_1011_0101;
+
     private const double ChunkSeconds = 0.005;
 
     // A short detection window and hop keep the analysis recent. The detector still reports a pitch
@@ -74,7 +77,15 @@ public sealed class AutoTuneEffect : AudioEffect
             description: "Root note of the song's key."));
         Scale = AddParameter(EffectParameter.Choice(
             "scale", "Scale", MusicalScale.ScaleNames,
-            description: "Notes the voice is pulled to. Chromatic allows all twelve notes and works with any song."));
+            description: "Notes the voice is pulled to. Chromatic allows all twelve notes and works with any song. Custom uses the notes you pick."));
+
+        // Chromatic and custom scales don't depend on a key.
+        Key.AvailableWhen(() => (ScaleType)Scale.IntValue is not (ScaleType.Chromatic or ScaleType.Custom));
+        CustomNotes = AddParameter(EffectParameter.Integer(
+            "notes", "Custom notes", 1, 0xFFF, DefaultCustomNotes,
+            formatter: v => MusicalScale.FormatNotes((int)MathF.Round(v)),
+            description: "The notes of the custom scale (one bit per note, C first).")
+            .AvailableWhen(() => (ScaleType)Scale.IntValue == ScaleType.Custom));
         RetuneSpeed = AddParameter(EffectParameter.Continuous(
             "retune", "Retune speed", 0, 400, 20, "ms", decimals: 0,
             formatter: v => v <= 0 ? "Instant" : v.ToString("0", CultureInfo.CurrentCulture) + " ms",
@@ -102,6 +113,9 @@ public sealed class AutoTuneEffect : AudioEffect
 
     public EffectParameter Scale { get; }
 
+    /// <summary>Notes of the custom scale as a bit mask (bit 0 = C). Used while <see cref="Scale"/> is <see cref="ScaleType.Custom"/>.</summary>
+    public EffectParameter CustomNotes { get; }
+
     public EffectParameter RetuneSpeed { get; }
 
     public EffectParameter Amount { get; }
@@ -110,8 +124,28 @@ public sealed class AutoTuneEffect : AudioEffect
 
     public EffectParameter Reference { get; }
 
-    /// <summary>Pitch classes of the selected key and scale (bit 0 = C).</summary>
-    public int ScaleMask => MusicalScale.ScaleMask((ScaleType)Scale.IntValue, Key.IntValue);
+    /// <summary>Pitch classes of the selected key and scale, or the custom notes (bit 0 = C).</summary>
+    public int ScaleMask => (ScaleType)Scale.IntValue == ScaleType.Custom
+        ? CustomNotes.IntValue & 0xFFF
+        : MusicalScale.ScaleMask((ScaleType)Scale.IntValue, Key.IntValue);
+
+    /// <summary>
+    /// Adds a note to the allowed notes or removes it. A preset scale becomes a custom scale with the
+    /// same notes first, so picking notes always starts from what is selected. The last note can't be
+    /// removed. Returns whether anything changed.
+    /// </summary>
+    public bool ToggleNote(int pitchClass)
+    {
+        int mask = ScaleMask ^ (1 << MusicalScale.PitchClass(pitchClass));
+        if (mask == 0)
+        {
+            return false;
+        }
+
+        CustomNotes.Value = mask;
+        Scale.Value = (int)ScaleType.Custom;
+        return true;
+    }
 
     public override int LatencyFrames => _shifter?.LatencyFrames ?? 0;
 

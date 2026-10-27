@@ -27,16 +27,23 @@ pick an output, and hear the result live with low delay.
   - *High quality (phase vocoder)*: a phase-locked phase vocoder followed by resampling. It sounds
     smoother for large shifts and adds more delay.
 
+  Both move the formants (the resonances that make a voice recognisable) along with the pitch, like
+  playing a recording faster or slower: up sounds like a chipmunk, down like a slowed-down tape.
+
   **Preserve formants** keeps the character of your voice when you shift it, so an octave up sounds
-  like you singing higher rather than a chipmunk, and an octave down sounds like you rather than a
-  monster. It works by estimating the spectral envelope (the formants) of every frame and putting it
-  back where it was after the harmonics have moved. With it on, **Formant shift** moves the formants
-  on their own: negative values sound like a bigger person, positive values like a smaller one,
-  without changing the pitch. Formant preservation always uses the high quality algorithm, so it adds
-  about 20 ms more delay than the low latency one.
+  like you singing higher rather than a chipmunk, and an octave down like a deeper person rather than
+  a monster. It uses a pitch-synchronous algorithm made for voices (PSOLA): it finds every glottal
+  pulse of your voice and lays the pulses down again closer together or further apart. Each pulse
+  keeps its own shape, so the formants and the clear upper harmonics of your voice stay as they were,
+  and breath noise isn't dragged down into the voice. With it on, **Formant shift** moves the
+  formants on their own: negative values sound like a bigger person, positive values like a smaller
+  one, without changing the pitch. It adds about 35 ms of delay (about 15 ms more than the low
+  latency algorithm), and up to 45 ms with a large positive formant shift. It needs a single voice;
+  chords and music pass through unshifted.
 
   Presets: Higher voice, Lower voice, Chipmunk, Deep, Monster, Harmony, Detune, Natural octave up,
-  Natural octave down, Bigger voice, Smaller voice.
+  Natural octave down, Bigger voice, Smaller voice. *Lower voice*, *Deep* and the *Natural* and
+  *Bigger/Smaller voice* presets preserve formants; *Monster* deliberately doesn't.
 - **Auto Tune:** detects the pitch of your voice and pulls it to the nearest note of a key and scale.
   See [Auto Tune](#auto-tune) below.
 - **Node editor** for anything beyond one microphone and one chain: several inputs at once, a
@@ -133,14 +140,17 @@ Add it with **Add effect → Auto Tune**. While audio is running the card shows:
 - **Pitch graph:** the last five seconds of your sung pitch (cyan) and the corrected pitch (purple),
   drawn on note lines. The notes of the selected scale are labelled, and the key's root note is
   highlighted.
-- **Allowed notes:** the notes of the selected key and scale. The target note is filled in, and the
-  note you are closest to is outlined.
+- **Allowed notes:** the twelve notes, with the ones your voice can be pulled to lit up. The target
+  note is filled in, and the note you are closest to is outlined. **Click a note to allow it or leave
+  it out**: the scale becomes a *Custom* scale with exactly the notes you picked (starting from the
+  selected scale), shown as e.g. "Custom: C D E G A". Choose another scale to go back; choosing
+  *Custom* again brings your notes back.
 
 Settings:
 
 | Setting | What it does |
 | --- | --- |
-| Key and Scale | The notes your voice is pulled to. *Chromatic* (default) allows all twelve notes and works with any song. Also available: major, minor, harmonic minor, major/minor pentatonic, blues, Dorian and Mixolydian, in any key. |
+| Key and Scale | The notes your voice is pulled to. *Chromatic* (default) allows all twelve notes and works with any song. Also available: major, minor, harmonic minor, major/minor pentatonic, blues, Dorian and Mixolydian, in any key, and *Custom*: the notes you click on the note strip (the key doesn't apply to it). |
 | Retune speed | How fast the pitch moves to the note. *Instant* (0 ms) gives the hard, robotic sound and flattens vibrato. 20–80 ms sounds like a polished vocal. 150 ms and above corrects gently and keeps slides and vibrato. |
 | Correction | How much of the distance to the note is corrected. 100 % lands exactly on the note. |
 | Transpose | Moves the corrected notes up or down by up to an octave. |
