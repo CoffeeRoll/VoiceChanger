@@ -67,12 +67,14 @@ public readonly ref struct NodeBlock
     private readonly float[]?[] _inputs;
     private readonly float[][] _outputs;
     private readonly float[] _silence;
+    private readonly int[] _inputLatencies;
 
-    internal NodeBlock(float[]?[] inputs, float[][] outputs, float[] silence, Span<float> device, int frames, int channels)
+    internal NodeBlock(float[]?[] inputs, float[][] outputs, float[] silence, Span<float> device, int frames, int channels, int[]? inputLatencies = null)
     {
         _inputs = inputs;
         _outputs = outputs;
         _silence = silence;
+        _inputLatencies = inputLatencies ?? new int[inputs.Length];
         Device = device;
         Frames = frames;
         Channels = channels;
@@ -95,6 +97,12 @@ public readonly ref struct NodeBlock
     public Span<float> Device { get; }
 
     public bool IsConnected(int input) => _inputs[input] is not null;
+
+    /// <summary>
+    /// How late the signal at an input is: the delay of the slowest path from a source to it, in
+    /// frames (0 when nothing is connected).
+    /// </summary>
+    public int InputLatencyFrames(int input) => _inputLatencies[input];
 
     /// <summary>The signal arriving at an input (silence when nothing is connected). Never write to it: it is shared.</summary>
     public ReadOnlySpan<float> Input(int index) => (_inputs[index] ?? _silence).AsSpan(0, Samples);

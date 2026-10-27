@@ -15,6 +15,7 @@ internal sealed class GraphPlan
 
     private readonly Step[] _steps;
     private readonly float[] _silence;
+    private readonly int[] _pathLatency;
 
     private GraphPlan(Step[] steps, int channels, string routing)
     {
@@ -22,6 +23,7 @@ internal sealed class GraphPlan
         Channels = channels;
         Routing = routing;
         _silence = new float[BlockFrames * channels];
+        _pathLatency = new int[steps.Length];
     }
 
     public int Channels { get; }
@@ -52,15 +54,18 @@ internal sealed class GraphPlan
         {
             var node = order[s];
             var inputs = new float[]?[node.Inputs.Count];
+            var sources = new int[inputs.Length];
             var upstream = new List<int>();
             routing.Append(node.Id.ToString("N")).Append('(');
             for (int i = 0; i < inputs.Length; i++)
             {
                 var connection = graph.ConnectionTo(node.Inputs[i]);
+                sources[i] = -1;
                 if (connection is not null && outputBuffers.TryGetValue(connection.From, out var buffer))
                 {
                     inputs[i] = buffer;
-                    upstream.Add(stepIndex[connection.From.Node]);
+                    sources[i] = stepIndex[connection.From.Node];
+                    upstream.Add(sources[i]);
                     routing.Append(connection.From.Node.Id.ToString("N")).Append('.').Append(connection.From.Id);
                 }
 
@@ -82,7 +87,7 @@ internal sealed class GraphPlan
             }
 
             routing.Append(device is null ? "" : "*").Append(';');
-            steps[s] = new Step(node, inputs, outputs, device, upstream.ToArray());
+            steps[s] = new Step(node, inputs, outputs, device, upstream.ToArray(), sources, new int[inputs.Length]);
             stepIndex[node] = s;
         }
 
@@ -97,10 +102,20 @@ internal sealed class GraphPlan
             throw new ArgumentOutOfRangeException(nameof(frames));
         }
 
-        foreach (var step in _steps)
+        for (int s = 0; s < _steps.Length; s++)
         {
+            var step = _steps[s];
+
+            // How late each input is, from the delays of the nodes processed so far (they can
+            // change while playing, e.g. when an effect is switched off).
+            for (int i = 0; i < step.Sources.Length; i++)
+            {
+                step.InputLatencies[i] = step.Sources[i] < 0 ? 0 : _pathLatency[step.Sources[i]];
+            }
+
             var device = step.Device is null ? Span<float>.Empty : step.Device.AsSpan(0, frames * Channels);
-            step.Node.Process(new NodeBlock(step.Inputs, step.Outputs, _silence, device, frames, Channels));
+            step.Node.Process(new NodeBlock(step.Inputs, step.Outputs, _silence, device, frames, Channels, step.InputLatencies));
+            _pathLatency[s] = PathLatency(step, _pathLatency);
         }
     }
 
@@ -111,13 +126,7 @@ internal sealed class GraphPlan
         int longest = 0;
         for (int s = 0; s < _steps.Length; s++)
         {
-            int upstream = 0;
-            foreach (int u in _steps[s].Upstream)
-            {
-                upstream = Math.Max(upstream, path[u]);
-            }
-
-            path[s] = upstream + _steps[s].Node.LatencyFrames;
+            path[s] = PathLatency(_steps[s], path);
             if (_steps[s].Node is OutputDeviceNode)
             {
                 longest = Math.Max(longest, path[s]);
@@ -125,6 +134,18 @@ internal sealed class GraphPlan
         }
 
         return longest;
+    }
+
+    /// <summary>Delay of the slowest path through a step, given those of the steps before it.</summary>
+    private static int PathLatency(Step step, int[] path)
+    {
+        int upstream = 0;
+        foreach (int u in step.Upstream)
+        {
+            upstream = Math.Max(upstream, path[u]);
+        }
+
+        return upstream + step.Node.LatencyFrames;
     }
 
     private static HashSet<AudioNode> FindLiveNodes(AudioGraph graph)
@@ -192,5 +213,7 @@ internal sealed class GraphPlan
         return order;
     }
 
-    private sealed record Step(AudioNode Node, float[]?[] Inputs, float[][] Outputs, float[]? Device, int[] Upstream);
+    /// <param name="Sources">For every input, the step feeding it, or -1.</param>
+    /// <param name="InputLatencies">Filled in before every block: how late each input is.</param>
+    private sealed record Step(AudioNode Node, float[]?[] Inputs, float[][] Outputs, float[]? Device, int[] Upstream, int[] Sources, int[] InputLatencies);
 }

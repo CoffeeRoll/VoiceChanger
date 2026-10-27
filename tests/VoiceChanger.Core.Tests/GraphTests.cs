@@ -155,11 +155,11 @@ public class AudioGraphTests
     }
 
     [Fact]
-    public void The_registry_offers_devices_generators_every_effect_and_the_mixer()
+    public void The_registry_offers_devices_generators_every_effect_the_mixer_and_the_synchronizer()
     {
         var registry = NodeRegistry.Default;
         Assert.Equal(
-            ["input", "tone", "effect:pitch-shift", "effect:auto-tune", "effect:equalizer", "mixer", "output"],
+            ["input", "tone", "effect:pitch-shift", "effect:auto-tune", "effect:equalizer", "effect:vocoder", "mixer", "sync", "output"],
             registry.Descriptors.Select(d => d.TypeId));
 
         var node = Assert.IsType<EffectNode>(registry.Create("effect:auto-tune"));

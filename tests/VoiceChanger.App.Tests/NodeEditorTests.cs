@@ -321,6 +321,130 @@ public sealed class NodeEditorTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void The_synchronizer_lines_up_two_microphones_by_listening_for_a_clap()
+    {
+        var backend = new FakeAudioBackend();
+        var (window, vm, editor) = ShowNodes(new MainWindowViewModel(backend, Store()));
+        var graph = editor.Graph;
+        var registry = NodeRegistry.Default;
+        foreach (var node in editor.Nodes.Where(n => n.Node is EffectNode or MixerNode).ToList())
+        {
+            editor.RemoveNode(node);
+        }
+
+        // Two microphones, the second delivering everything 30 ms late, lined up and mixed.
+        var mic = graph.Nodes.OfType<InputDeviceNode>().Single();
+        var speakers = graph.Nodes.OfType<OutputDeviceNode>().Single();
+        var line = (InputDeviceNode)editor.AddNode(registry.Find(InputDeviceNode.Type)!).Node;
+        line.DeviceId = "line";
+        var syncViewModel = Assert.IsType<SyncNodeViewModel>(editor.AddNode(registry.Find(SyncNode.Type)!));
+        var sync = (SyncNode)syncViewModel.Node;
+        var mixer = (MixerNode)editor.AddNode(registry.Find(MixerNode.Type)!).Node;
+        graph.Connect(mic.Outputs[0], sync.Inputs[0]);
+        graph.Connect(line.Outputs[0], sync.Inputs[1]);
+        graph.Connect(sync.Outputs[0], mixer.Inputs[0]);
+        graph.Connect(sync.Outputs[1], mixer.Inputs[1]);
+        graph.Connect(mixer.Outputs[0], speakers.Inputs[0]);
+        editor.SelectedNode = syncViewModel;
+        Render(window);
+
+        var inspector = window.GetVisualDescendants().OfType<NodeInspector>().Single();
+        var listen = inspector.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "ListenButton");
+        Assert.Equal(2, syncViewModel.Channels.Count);
+        Assert.Equal("2 inputs · effect delays matched", syncViewModel.Summary);
+
+        // Listening needs sound coming in.
+        listen.Command!.Execute(null);
+        Assert.False(syncViewModel.IsListening);
+        Assert.Contains("Start", syncViewModel.ListenStatus);
+
+        vm.Start();
+        var main = backend.Outputs.Single(o => o.DeviceId == "speakers" && o.IsStarted);
+        var micStream = backend.Inputs.Single(i => i.DeviceId == "mic");
+        var lineStream = backend.Inputs.Single(i => i.DeviceId == "line");
+        listen.Command.Execute(null);
+        Assert.True(syncViewModel.IsListening);
+        Assert.Equal("Stop listening", syncViewModel.ListenButtonText);
+
+        var random = new Random(2);
+        var claps = new float[(int)(5 * 48000)];
+        foreach (double at in new[] { 0.6, 1.45, 2.3, 3.1, 3.7 })
+        {
+            for (int n = 0; n < 960; n++)
+            {
+                claps[(int)(at * 48000) + n] = (float)(0.6 * Math.Exp(-n / 200.0) * (random.NextDouble() * 2 - 1));
+            }
+        }
+
+        var late = new float[claps.Length];
+        claps.AsSpan(0, claps.Length - 1440).CopyTo(late.AsSpan(1440));
+        for (int offset = 0; offset + 480 <= claps.Length; offset += 480)
+        {
+            micStream.Push(claps.AsSpan(offset, 480));
+            lineStream.Push(late.AsSpan(offset, 480));
+            main.Pull(480);
+            if (offset % 1440 == 0)
+            {
+                vm.UpdateStatus();
+            }
+        }
+
+        for (int i = 0; i < 200 && syncViewModel.IsListening; i++)
+        {
+            Thread.Sleep(10);
+            vm.UpdateStatus();
+        }
+
+        Assert.False(syncViewModel.IsListening);
+        Assert.Contains("input 2 was", syncViewModel.ListenStatus);
+        Assert.Contains("ms late", syncViewModel.ListenStatus);
+        Assert.Equal(-30, sync.Offsets[1].Value, 1.0);
+        Assert.Equal("2 inputs · effect delays matched · 1 input moved", syncViewModel.Summary);
+
+        // The first microphone now waits for the second.
+        for (int block = 0; block < 6; block++)
+        {
+            micStream.Push(claps.AsSpan(0, 480));
+            lineStream.Push(late.AsSpan(0, 480));
+            main.Pull(480);
+        }
+
+        vm.UpdateStatus();
+        Assert.StartsWith("waits 30", syncViewModel.Channels[0].Delay);
+        Assert.Equal("no delay", syncViewModel.Channels[1].Delay);
+        Assert.EndsWith("ms earlier", editor.Find(sync)!.Inputs[1].Detail);
+
+        window.Close();
+        vm.Dispose();
+    }
+
+    [AvaloniaFact]
+    public void The_vocoder_node_has_a_carrier_socket()
+    {
+        var (window, vm, editor) = ShowNodes(new MainWindowViewModel(new FakeAudioBackend(), Store()));
+        var vocoder = Assert.IsType<EffectNodeViewModel>(
+            editor.AddNode(NodeRegistry.Default.Find(EffectNode.TypePrefix + VocoderEffect.Type)!));
+        var tone = editor.AddNode(NodeRegistry.Default.Find(ToneNode.Type)!);
+        Render(window);
+
+        Assert.Equal(["Voice", "Carrier"], vocoder.Inputs.Select(p => p.Name));
+        editor.Graph.Connect(tone.Node.Outputs[0], vocoder.Node.Inputs[1]);
+        Render(window);
+        Assert.True(vocoder.Inputs[1].IsConnected);
+        var view = window.GetVisualDescendants().OfType<NodeView>().Single(v => v.DataContext == vocoder);
+        Assert.Equal(3, view.GetVisualDescendants().OfType<NodeSocket>().Count());
+
+        // Its settings are in the inspector like any effect's.
+        editor.SelectedNode = vocoder;
+        Render(window);
+        var inspector = window.GetVisualDescendants().OfType<NodeInspector>().Single();
+        Assert.Contains(inspector.GetVisualDescendants().OfType<ParameterEditor>(), e => (e.DataContext as ParameterViewModel)?.Name == "Synth");
+
+        window.Close();
+        vm.Dispose();
+    }
+
+    [AvaloniaFact]
     public void The_mixer_inspector_adds_inputs_and_mutes_them()
     {
         var (window, vm, editor) = ShowNodes(new MainWindowViewModel(new FakeAudioBackend(), Store()));

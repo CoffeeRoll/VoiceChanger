@@ -43,9 +43,12 @@ pick an output, and hear the result live with low delay.
   spectral method); *Monster* deliberately doesn't.
 - **Auto Tune:** detects the pitch of your voice and pulls it to the nearest note of a key and scale.
   See [Auto Tune](#auto-tune) below.
+- **Vocoder:** your voice shapes another sound: a robot that follows your pitch, a monotone robot, a
+  choir, a whisper, or (in the node editor) any instrument or music plugged into its *Carrier*
+  socket. See [Vocoder](#vocoder) below.
 - **Node editor** for anything beyond one microphone and one chain: several inputs at once, a
-  **mixer** to combine them, effects anywhere in between, and several outputs. See
-  [Node editor](#node-editor) below.
+  **mixer** to combine them, a **synchronizer** to line them up in time, effects anywhere in between,
+  and several outputs. See [Node editor](#node-editor) below.
 - Input and output **level meters**, input gain and output volume.
 - **Remembers your settings**: devices, effects, every effect setting, the node graph and the latency
   preset.
@@ -90,8 +93,9 @@ Nodes:
 | --- | --- |
 | Audio Input | Audio from a microphone, line input or any other recording device. Add one per device to use several at once. Has its own gain. |
 | Tone Generator | A sine, triangle, sawtooth or square wave, or white noise. Handy for testing a patch, or as a drone under your voice. |
-| Pitch Shifter, Auto Tune, Equalizer | The effects, with the same settings and presets as in the chain. The switch in the node's header turns it on or off. |
+| Pitch Shifter, Auto Tune, Equalizer, Vocoder | The effects, with the same settings and presets as in the chain. The switch in the node's header turns it on or off. The Vocoder node has a second socket, *Carrier*, for the sound your voice shapes. |
 | Mixer | Combines 2 to 8 signals. Each input has a volume fader, a mute button and a level meter, and there is a master volume. |
+| Synchronizer | Lines up 2 to 8 signals in time, so they play together: each input comes out of its own output, delayed as needed. See [Lining up sources](#lining-up-sources-synchronizer). |
 | Audio Output | Plays the signal on a device. Add one per device to play on several at once, e.g. your headphones and a virtual cable. Has its own volume. |
 
 Working with nodes:
@@ -116,13 +120,63 @@ needs audio, the app pulls the latest audio from every input device, runs the wh
 the result to the other output devices. Every other device runs on its own clock, so each one gets its
 own sample rate conversion and drift compensation, the same way the chain connects its two devices.
 
+### Lining up sources (Synchronizer)
+
+Signals from different places don't arrive at the same time. A voice through the pitch shifter comes
+out about 35 ms after a backing track that went straight to the mixer, and a Bluetooth headset
+records its sound far later than a wired microphone. Put a **Synchronizer** in front of the mixer:
+wire each source into one of its inputs and each of its outputs into the mixer.
+
+- **Match effect delays** (on by default) delays the signals that went through fewer or faster
+  effects, so everything that left its source at the same moment comes out together. The app knows
+  every effect's delay, so this is automatic, and it follows along when you switch effects on or off.
+- **Input timing** moves one input later or earlier by up to half a second, for delays the app can't
+  know, such as a device's own recording delay. Earlier works by delaying all the others, since
+  nothing can play before it is heard.
+- **Listen for a clap** works out those device delays for you. Press it while the audio is running,
+  then clap (or make any sharp sound) once or twice where every source can hear it. After four
+  seconds the synchronizer compares the inputs, sets each one's timing so the claps line up, and
+  tells you how late each input was. For music, play it out loud so the microphones pick it up too.
+- The inspector shows how long each input waits; the inputs' timings are shown next to their sockets.
+  Timing changes fade over 10 ms, so they never click.
+
 Limitations:
 
-- When signals that went through effects with different delays meet in a mixer, they are not
-  re-aligned. For example, a dry voice mixed with the same voice through the phase vocoder is offset by
-  about 20 ms.
+- Without a synchronizer, signals that went through effects with different delays are not re-aligned
+  when they meet in a mixer. For example, a dry voice mixed with the same voice through the phase
+  vocoder is offset by about 20 ms.
 - An Audio Input node that isn't connected to anything still opens its device, so its level meter keeps
   working.
+
+## Vocoder
+
+Add it with **Add effect → Vocoder**, or as a node. Your voice is split into bands (8 to 32, from
+100 Hz to 8 kHz), and another sound, the *carrier*, is played through the same bands at the loudness
+your voice has in each. The carrier is:
+
+- whatever is plugged into the node's **Carrier** socket in the node editor: an instrument from an
+  Audio Input, music from a virtual cable, or a Tone Generator. Anything rich in harmonics works best;
+  or
+- otherwise the built-in **Synth**: a sawtooth on *your pitch* (a talking robot, which keeps your
+  intonation; *Transpose* moves it), on a fixed *Note*, a major *Chord* (a choir), or *Whisper*
+  (noise).
+
+| Setting | What it does |
+| --- | --- |
+| Synth, Note, Transpose | The built-in carrier, when nothing is plugged into the Carrier socket. |
+| Bands | More bands make words clearer; fewer sound more robotic. |
+| Response | How quickly the sound falls quiet after your voice does: short is crisp, long is smooth. |
+| Formant shift | Moves the resonances of your voice on the carrier: negative sounds bigger, positive smaller. |
+| Consonants | Lets the hiss of s, t and f through, so words stay clear. |
+| Mix, Output | Blend with your own voice, and the vocoder's volume. |
+
+Presets: Robot, Deep robot, Monotone, Choir, Whisper, Classic (16 bands). The vocoder adds no delay.
+
+## Plugins (planned)
+
+Third-party VST3 effects aren't supported yet. [docs/vst-plugin-support.md](docs/vst-plugin-support.md)
+describes what it would take: a native bridge to the VST3 SDK, plugins as regular effects and nodes,
+plugin windows, scanning in a separate process, saved plugin state, and crash isolation.
 
 ## Auto Tune
 
@@ -238,7 +292,8 @@ work on Windows. On other systems the window opens, but the device lists are emp
   and output device is connected to it through the same kind of buffer, resampler and drift control.
   The graph is compiled into an immutable plan (only nodes that lead to an output, in dependency order,
   with a buffer per output socket). Edits publish a new plan that the audio thread picks up on its
-  next block.
+  next block. With every block the plan also adds up the delay of the effects on each path, and tells
+  each node how late each of its inputs is: that is how the synchronizer matches effect delays.
 - Devices are opened in WASAPI shared mode with event-driven buffers. The audio threads run at the
   "Pro Audio" scheduling priority of the Windows Multimedia Class Scheduler Service (MMCSS).
 
@@ -260,7 +315,8 @@ work on Windows. On other systems the window opens, but the device lists are emp
 
 The UI builds a generic editor from the parameters (sliders, choices, switches), so the new effect
 appears under **Add effect**, and as a node under **Add node**, without any UI code. Settings are saved
-and restored automatically.
+and restored automatically. An effect that needs a second signal (like the vocoder's carrier) also
+implements `ISidechainEffect`; its node then gets a second input socket.
 
 ```csharp
 public sealed class GainEffect : AudioEffect

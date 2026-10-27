@@ -154,6 +154,60 @@
                       </StackPanel>
                     </DataTemplate>
 
+                    <DataTemplate DataType="vm:SyncNodeViewModel">
+                      <StackPanel Spacing="12">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Classes="label" Text="{Binding InputCount, StringFormat='{}{0} inputs'}" />
+                          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
+                            <Button Classes="icon" Command="{Binding RemoveInputCommand}" ToolTip.Tip="Remove the last input">
+                              <Path Classes="icon" Data="{StaticResource IconMinus}" />
+                            </Button>
+                            <Button x:Name="AddSyncInputButton" Classes="icon" Command="{Binding AddInputCommand}" ToolTip.Tip="Add an input (up to eight)">
+                              <Path Classes="icon" Data="{StaticResource IconPlus}" />
+                            </Button>
+                          </StackPanel>
+                        </Grid>
+
+                        <views:ParameterEditor DataContext="{Binding Match}" />
+
+                        <ItemsControl ItemsSource="{Binding Channels}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:SyncChannelViewModel">
+                              <Border Classes="channel">
+                                <StackPanel Spacing="2">
+                                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                      <TextBlock Classes="value" FontWeight="SemiBold" Text="{Binding Name}" />
+                                      <TextBlock Classes="label" Text="not connected" IsVisible="{Binding !IsConnected}" />
+                                      <TextBlock Classes="label" Text="{Binding Delay}" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Classes="value" Text="{Binding Offset.DisplayValue}" />
+                                  </Grid>
+                                  <Slider DataContext="{Binding Offset}"
+                                          Minimum="0"
+                                          Maximum="1"
+                                          SmallChange="{Binding SmallChange}"
+                                          LargeChange="0.1"
+                                          Value="{Binding Position}"
+                                          ToolTip.Tip="{Binding Description}" />
+                                  <controls:LevelMeter Level="{Binding LevelDb}" Height="4" />
+                                </StackPanel>
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <Border Background="{StaticResource CardRaisedBrush}" CornerRadius="8" Padding="12,10">
+                          <StackPanel Spacing="8">
+                            <TextBlock Classes="label" FontWeight="SemiBold" Text="Line up by listening" />
+                            <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding ListenStatus}" />
+                            <ProgressBar Minimum="0" Maximum="1" Value="{Binding ListenProgress}" IsVisible="{Binding IsListening}" Height="4" MinHeight="4" />
+                            <Button x:Name="ListenButton" Command="{Binding ListenCommand}" Content="{Binding ListenButtonText}" HorizontalAlignment="Left" />
+                          </StackPanel>
+                        </Border>
+                      </StackPanel>
+                    </DataTemplate>
+
                     <DataTemplate DataType="vm:GenericNodeViewModel">
                       <StackPanel Spacing="12">
                         <ItemsControl ItemsSource="{Binding Parameters}">

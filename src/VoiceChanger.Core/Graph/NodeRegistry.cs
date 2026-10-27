@@ -50,6 +50,12 @@ public sealed class NodeRegistry
             NodeCategory.Mixing,
             () => new MixerNode()));
         registry.Register(new NodeDescriptor(
+            SyncNode.Type,
+            "Synchronizer",
+            "Lines up several signals in time, so sources that went through effects or come from slower devices play together.",
+            NodeCategory.Mixing,
+            () => new SyncNode()));
+        registry.Register(new NodeDescriptor(
             OutputDeviceNode.Type,
             "Audio Output",
             "Plays the signal on speakers, headphones or a virtual cable.",

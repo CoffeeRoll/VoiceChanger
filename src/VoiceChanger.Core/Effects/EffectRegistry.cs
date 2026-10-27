@@ -33,6 +33,11 @@ public sealed class EffectRegistry
             "Equalizer",
             "Ten band graphic equalizer with low and high cut filters.",
             () => new EqualizerEffect()));
+        registry.Register(new EffectDescriptor(
+            VocoderEffect.Type,
+            "Vocoder",
+            "Your voice shapes another sound: a robot, a choir, a whisper, or any instrument plugged into its Carrier socket in the node editor.",
+            () => new VocoderEffect()));
         return registry;
     }
 

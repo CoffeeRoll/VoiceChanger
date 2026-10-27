@@ -46,8 +46,25 @@ public sealed class EffectChain
 
     public bool IsPrepared => _sampleRate > 0;
 
-    /// <summary>Total delay of the effects that are currently audible, in frames.</summary>
-    public int LatencyFrames => IsEnabled ? Effects.Where(e => e.IsEnabled).Sum(e => e.LatencyFrames) : 0;
+    /// <summary>Total delay of the effects that are currently audible, in frames. Allocation free (the graph reads it on the audio thread).</summary>
+    public int LatencyFrames
+    {
+        get
+        {
+            if (!IsEnabled)
+            {
+                return 0;
+            }
+
+            int total = 0;
+            foreach (var effect in Volatile.Read(ref _effects))
+            {
+                total += effect.IsEnabled ? effect.LatencyFrames : 0;
+            }
+
+            return total;
+        }
+    }
 
     /// <summary>Raised when effects are added, removed or reordered.</summary>
     public event EventHandler? Changed;
