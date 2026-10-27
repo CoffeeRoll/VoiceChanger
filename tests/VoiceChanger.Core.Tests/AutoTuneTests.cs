@@ -214,19 +214,22 @@ public class AutoTuneEffectTests
     }
 
     [Theory]
-    [InlineData(110, -12)]
-    [InlineData(210, -12)]
-    [InlineData(210, 7)]
-    public void Transposing_keeps_the_character_of_the_voice(double f0, int transpose)
+    [InlineData(110, -12, VoiceShiftMethod.Pulse)]
+    [InlineData(210, -12, VoiceShiftMethod.Pulse)]
+    [InlineData(210, 7, VoiceShiftMethod.Pulse)]
+    [InlineData(110, 12, VoiceShiftMethod.Spectral)]
+    [InlineData(210, 7, VoiceShiftMethod.Spectral)]
+    public void Transposing_keeps_the_character_of_the_voice(double f0, int transpose, VoiceShiftMethod method)
     {
-        // Auto tune moves the voice's own pulses, like the pitch shifter's formant preservation:
-        // transposed down an octave it sounds like a deeper voice, not a slowed-down recording.
+        // Auto tune shifts with the pitch shifter's voice methods: transposed down an octave it
+        // sounds like a deeper voice, not a slowed-down recording, and up like a higher one.
         double ratio = Math.Pow(2, transpose / 12.0);
         var input = SyntheticVoice.Generate(3, t => SyntheticVoice.Speech(t, f0), SyntheticVoice.Vowels);
         var ideal = SyntheticVoice.Generate(3, t => SyntheticVoice.Speech(t, f0) * ratio, SyntheticVoice.Vowels);
         var effect = new AutoTuneEffect();
         effect.Transpose.Value = transpose;
         effect.Amount.Value = 0;
+        effect.VoiceMethod.Value = (int)method;
         effect.Prepare(SampleRate, 1);
         var output = (float[])input.Clone();
         ProcessInBlocks(output, 1, 480, block => effect.Process(block.Span));
@@ -237,8 +240,10 @@ public class AutoTuneEffectTests
         Assert.True(SyntheticVoice.Periodicity(output, 1000) > SyntheticVoice.Periodicity(ideal, 1000) - 1.5);
     }
 
-    [Fact]
-    public void Instant_retune_flattens_vibrato_and_slow_retune_keeps_it()
+    [Theory]
+    [InlineData(VoiceShiftMethod.Pulse, 6)]
+    [InlineData(VoiceShiftMethod.Spectral, 15)] // corrects every frame, from a detector that averages a little
+    public void Instant_retune_flattens_vibrato_and_slow_retune_keeps_it(VoiceShiftMethod method, double hardResidual)
     {
         static double ResidualVibrato(float[] output)
         {
@@ -258,11 +263,53 @@ public class AutoTuneEffectTests
         // A3 with a ±40 cent, 5 Hz vibrato.
         static double Vibrato(double t) => 220 * Math.Pow(2, 40 / 1200.0 * Math.Sin(2 * Math.PI * 5 * t));
 
-        var (_, hard) = Run(Vibrato, 2, e => e.RetuneSpeed.Value = 0);
-        var (_, natural) = Run(Vibrato, 2, e => e.RetuneSpeed.Value = 200);
+        var (_, hard) = Run(Vibrato, 2, e =>
+        {
+            e.RetuneSpeed.Value = 0;
+            e.VoiceMethod.Value = (int)method;
+        });
+        var (_, natural) = Run(Vibrato, 2, e =>
+        {
+            e.RetuneSpeed.Value = 200;
+            e.VoiceMethod.Value = (int)method;
+        });
 
-        Assert.InRange(ResidualVibrato(hard), 0, 6);
+        Assert.InRange(ResidualVibrato(hard), 0, hardResidual);
         Assert.InRange(ResidualVibrato(natural), 30, 50);
+    }
+
+    [Theory]
+    [InlineData(452, 440)]
+    [InlineData(428, 440)]
+    [InlineData(103, 103.83)]
+    public void Spectral_method_pulls_to_the_note_too(double sung, double expected)
+    {
+        var (effect, output) = Run(_ => sung, 1.2, e => e.VoiceMethod.Value = (int)VoiceShiftMethod.Spectral);
+        Assert.InRange(Cents(DominantFrequency(output.AsSpan(SampleRate / 2), SampleRate), expected), -3, 3);
+        Assert.Equal(new SpectralVoiceShifter(1, SampleRate).LatencyFrames, effect.LatencyFrames);
+
+        var reading = effect.Reading;
+        Assert.True(reading.IsVoiced);
+        Assert.InRange(Cents(reading.InputFrequency, sung), -3, 3);
+        Assert.Equal((int)Math.Round(MusicalScale.FrequencyToNote(expected)), reading.TargetNote);
+    }
+
+    [Fact]
+    public void Switching_the_voice_method_while_running_keeps_correcting()
+    {
+        var effect = new AutoTuneEffect();
+        effect.Prepare(SampleRate, 1);
+        int pulseLatency = effect.LatencyFrames;
+        var first = PitchDetectorTests.Voice(452, SampleRate, SampleRate);
+        ProcessInBlocks(first, 1, 480, block => effect.Process(block.Span));
+
+        effect.VoiceMethod.Value = (int)VoiceShiftMethod.Spectral;
+        var second = PitchDetectorTests.Voice(452, SampleRate, SampleRate);
+        ProcessInBlocks(second, 1, 480, block => effect.Process(block.Span));
+
+        Assert.NotEqual(pulseLatency, effect.LatencyFrames);
+        Assert.InRange(Cents(DominantFrequency(first.AsSpan(SampleRate / 4), SampleRate), 440), -3, 3);
+        Assert.InRange(Cents(DominantFrequency(second.AsSpan(SampleRate / 4), SampleRate), 440), -3, 3);
     }
 
     [Fact]

@@ -1,14 +1,6 @@
 namespace VoiceChanger.Core.Dsp;
 
 /// <summary>
-/// Chooses the pitch ratio for one grain of a <see cref="PsolaPitchShifter"/>.
-/// </summary>
-/// <param name="period">Period of the pulse the grain is cut around, in samples, or 0 for unvoiced audio.</param>
-/// <param name="time">Position of the grain in the output stream, in samples.</param>
-/// <returns>Output pitch divided by input pitch for this grain.</returns>
-public delegate double PitchCorrection(double period, double time);
-
-/// <summary>
 /// Formant-preserving pitch shifter for voices: pitch-synchronous overlap-add of the excitation
 /// (LP-PSOLA; after E. Moulines and F. Charpentier, 1990).
 /// <para>
@@ -37,7 +29,7 @@ public delegate double PitchCorrection(double period, double time);
 /// the period before the previous mark.
 /// </para>
 /// </summary>
-public sealed class PsolaPitchShifter
+public sealed class PsolaPitchShifter : IVoiceShifter
 {
     private const double MinFrequency = 75;
     private const double MaxFrequency = 900;

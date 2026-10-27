@@ -313,8 +313,8 @@ public sealed class NodeEditorTests : IDisposable
         var pitch = editor.Nodes.OfType<EffectNodeViewModel>().First(n => n.Effect is PitchShiftViewModel);
         pitch.Effect.SelectedPreset = pitch.Effect.Presets.Single(p => p.Name == "Deep");
         var effect = (PitchShiftEffect)((EffectNode)pitch.Node).Effect;
-        Assert.Equal(PitchShiftEffect.FormantMode, effect.EffectiveMode);
-        Assert.Equal("-7 semitones · formants -3.0 semitones", pitch.Summary);
+        Assert.Equal(PitchShiftEffect.VoicePulseMode, effect.EffectiveMode);
+        Assert.Equal("-7 semitones · formants -3.0 semitones (pulse)", pitch.Summary);
 
         window.Close();
         vm.Dispose();
