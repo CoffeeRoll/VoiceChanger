@@ -9,6 +9,7 @@ using Avalonia.VisualTree;
 using VoiceChanger.App.Controls;
 using VoiceChanger.App.ViewModels;
 using VoiceChanger.App.Views;
+using VoiceChanger.Core.Dsp;
 using VoiceChanger.Core.Effects;
 using VoiceChanger.Core.Graph;
 using VoiceChanger.Core.Settings;
@@ -286,6 +287,34 @@ public sealed class NodeEditorTests : IDisposable
         Render(window);
         inspector.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "DeleteNodeButton").Command!.Execute(null);
         Assert.Equal(5, editor.Nodes.Count);
+
+        window.Close();
+        vm.Dispose();
+    }
+
+    [AvaloniaFact]
+    public void Effect_nodes_use_the_full_effect_editors()
+    {
+        var (window, vm, editor) = ShowNodes(new MainWindowViewModel(new FakeAudioBackend(), Store()));
+        var autoTune = Assert.IsType<EffectNodeViewModel>(
+            editor.AddNode(NodeRegistry.Default.Find(EffectNode.TypePrefix + AutoTuneEffect.Type)!));
+        Render(window);
+
+        // The inspector shows the auto tune's note strip: clicking notes picks a custom scale.
+        var inspector = window.GetVisualDescendants().OfType<NodeInspector>().Single();
+        var chips = inspector.GetVisualDescendants().OfType<Button>().Where(b => b.Classes.Contains("chip")).ToList();
+        Assert.Equal(12, chips.Count);
+        chips.Single(c => (string?)c.Content == "C#").Command!.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal((int)ScaleType.Custom, ((AutoTuneEffect)((EffectNode)autoTune.Node).Effect).Scale.Value);
+        Assert.Equal("custom scale (11 notes) · 20 ms retune", autoTune.Summary);
+
+        // Presets that lower the voice keep it natural in the graph too.
+        var pitch = editor.Nodes.OfType<EffectNodeViewModel>().First(n => n.Effect is PitchShiftViewModel);
+        pitch.Effect.SelectedPreset = pitch.Effect.Presets.Single(p => p.Name == "Deep");
+        var effect = (PitchShiftEffect)((EffectNode)pitch.Node).Effect;
+        Assert.Equal(PitchShiftEffect.FormantMode, effect.EffectiveMode);
+        Assert.Equal("-7 semitones · formants -3.0 semitones", pitch.Summary);
 
         window.Close();
         vm.Dispose();
