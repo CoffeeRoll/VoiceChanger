@@ -166,6 +166,47 @@ public sealed class AutoTuneUiTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Clicking_notes_picks_exactly_the_allowed_notes()
+    {
+        var (window, vm, _, autoTune) = ShowWithAutoTune();
+        autoTune.Parameters.Single(p => p.Parameter.Id == "key").SelectedIndex = 0;
+        autoTune.Parameters.Single(p => p.Parameter.Id == "scale").SelectedIndex = (int)ScaleType.MajorPentatonic;
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("C major pentatonic", autoTune.ScaleName);
+
+        // Click F on the note strip: C major pentatonic plus F.
+        var editor = window.GetVisualDescendants().OfType<AutoTuneEditor>().Single();
+        var chips = editor.GetVisualDescendants().OfType<Button>().Where(b => b.Classes.Contains("chip")).ToList();
+        Assert.Equal(12, chips.Count);
+        var f = chips.Single(c => (string?)c.Content == "F");
+        Assert.Contains("Click to allow it", ToolTip.GetTip(f) as string);
+        f.Command!.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("Custom: C D E F G A", autoTune.ScaleName);
+        Assert.Equal("Custom: C D E F G A", editor.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "ScaleNameText").Text);
+        Assert.True(autoTune.Notes[5].IsInScale);
+        Assert.Contains("inScale", f.Classes);
+        Assert.Equal(-1, autoTune.RootPitchClass);
+
+        // Click it again, and A: back to five notes, without A.
+        f.Command!.Execute(null);
+        chips.Single(c => (string?)c.Content == "A").Command!.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Custom: C D E G", autoTune.ScaleName);
+        autoTune.IsCollapsed = true;
+        Assert.Equal("custom scale (4 notes) · 20 ms retune", autoTune.Subtitle);
+
+        // The key no longer applies, and the raw note list is not shown as a slider.
+        var editors = editor.GetVisualDescendants().OfType<ParameterEditor>().Select(e => (ParameterViewModel)e.DataContext!).ToList();
+        Assert.DoesNotContain(editors, p => p.Parameter.Id == "notes");
+        Assert.False(editors.Single(p => p.Parameter.Id == "key").IsAvailable);
+
+        window.Close();
+        vm.Dispose();
+    }
+
+    [AvaloniaFact]
     public void Auto_tune_settings_are_saved_and_restored()
     {
         var store = new SettingsStore(Path.Combine(_directory, "settings.json"));
@@ -175,12 +216,14 @@ public sealed class AutoTuneUiTests : IDisposable
         effect.Key.Value = 7;
         effect.Scale.Value = (int)ScaleType.Major;
         effect.RetuneSpeed.Value = 0;
+        effect.ToggleNote(6); // G major without its F#
         first.Dispose();
 
         var second = new MainWindowViewModel(new FakeAudioBackend(), store);
         var restored = (AutoTuneEffect)second.Effects.OfType<AutoTuneViewModel>().Single().Effect;
         Assert.Equal(7, restored.Key.Value);
-        Assert.Equal((int)ScaleType.Major, restored.Scale.Value);
+        Assert.Equal((int)ScaleType.Custom, restored.Scale.Value);
+        Assert.Equal("C D E G A B", restored.CustomNotes.FormattedValue);
         Assert.Equal(0, restored.RetuneSpeed.Value);
         second.Dispose();
     }
@@ -192,9 +235,14 @@ public sealed class AutoTuneUiTests : IDisposable
         autoTune.Parameters.Single(p => p.Parameter.Id == "key").SelectedIndex = 9;
         autoTune.Parameters.Single(p => p.Parameter.Id == "scale").SelectedIndex = (int)ScaleType.NaturalMinor;
         autoTune.SelectedPreset = autoTune.Presets.Single(p => p.Name == "Hard tune");
+
+        // Click F and B off the note strip: A minor without them.
+        autoTune.Notes[5].ToggleCommand.Execute(null);
+        autoTune.Notes[11].ToggleCommand.Execute(null);
+        Assert.Equal("Custom: C D E G A", autoTune.ScaleName);
         vm.Start();
 
-        // A slightly out-of-tune phrase in A minor with vibrato and slides: A3 C4 E4 D4 C4.
+        // A slightly out-of-tune phrase with vibrato and slides: A3 C4 E4 D4 C4.
         double[] notes = [57.3, 60 - 0.35, 64.25, 62 + 0.3, 60.4];
         double phase = 0, time = 0;
         foreach (double note in notes)

@@ -88,14 +88,17 @@ Add it with **Add effect → Auto Tune**. While audio is running the card shows:
 - **Pitch graph:** the last five seconds of your sung pitch (cyan) and the corrected pitch (purple),
   drawn on note lines. The notes of the selected scale are labelled, and the key's root note is
   highlighted.
-- **Allowed notes:** the notes of the selected key and scale. The target note is filled in, and the
-  note you are closest to is outlined.
+- **Allowed notes:** the twelve notes, with the ones your voice can be pulled to lit up. The target
+  note is filled in, and the note you are closest to is outlined. **Click a note to allow it or leave
+  it out**: the scale becomes a *Custom* scale with exactly the notes you picked (starting from the
+  selected scale), shown as e.g. "Custom: C D E G A". Choose another scale to go back; choosing
+  *Custom* again brings your notes back.
 
 Settings:
 
 | Setting | What it does |
 | --- | --- |
-| Key and Scale | The notes your voice is pulled to. *Chromatic* (default) allows all twelve notes and works with any song. Also available: major, minor, harmonic minor, major/minor pentatonic, blues, Dorian and Mixolydian, in any key. |
+| Key and Scale | The notes your voice is pulled to. *Chromatic* (default) allows all twelve notes and works with any song. Also available: major, minor, harmonic minor, major/minor pentatonic, blues, Dorian and Mixolydian, in any key, and *Custom*: the notes you click on the note strip (the key doesn't apply to it). |
 | Retune speed | How fast the pitch moves to the note. *Instant* (0 ms) gives the hard, robotic sound and flattens vibrato. 20–80 ms sounds like a polished vocal. 150 ms and above corrects gently and keeps slides and vibrato. |
 | Correction | How much of the distance to the note is corrected. 100 % lands exactly on the note. |
 | Transpose | Moves the corrected notes up or down by up to an octave. |
