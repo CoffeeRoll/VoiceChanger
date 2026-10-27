@@ -8,6 +8,9 @@ internal sealed class FakeAudioBackend : IAudioBackend
 
     public AudioFormat OutputFormat { get; set; } = new(48000, 2);
 
+    /// <summary>Formats of individual devices; the others use <see cref="InputFormat"/> or <see cref="OutputFormat"/>.</summary>
+    public Dictionary<string, AudioFormat> DeviceFormats { get; } = [];
+
     public Exception? OpenOutputError { get; set; }
 
     public List<FakeInputStream> Inputs { get; } = [];
@@ -29,7 +32,7 @@ internal sealed class FakeAudioBackend : IAudioBackend
 
     public IAudioInputStream OpenInput(string deviceId, int bufferMilliseconds)
     {
-        var stream = new FakeInputStream(deviceId, InputFormat);
+        var stream = new FakeInputStream(deviceId, DeviceFormats.GetValueOrDefault(deviceId, InputFormat));
         Inputs.Add(stream);
         return stream;
     }
@@ -41,7 +44,7 @@ internal sealed class FakeAudioBackend : IAudioBackend
             throw OpenOutputError;
         }
 
-        var stream = new FakeOutputStream(deviceId, OutputFormat, latencyMilliseconds);
+        var stream = new FakeOutputStream(deviceId, DeviceFormats.GetValueOrDefault(deviceId, OutputFormat), latencyMilliseconds);
         Outputs.Add(stream);
         return stream;
     }

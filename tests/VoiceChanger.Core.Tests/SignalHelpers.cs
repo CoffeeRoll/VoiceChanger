@@ -85,6 +85,23 @@ internal static class SignalHelpers
         return (best + offset) * sampleRate / size;
     }
 
+    /// <summary>Amplitude of the sine component at <paramref name="frequency"/> (Hann windowed single-bin DFT).</summary>
+    public static double ToneAmplitude(ReadOnlySpan<float> samples, double frequency, int sampleRate)
+    {
+        double real = 0, imag = 0, windowSum = 0;
+        int n = samples.Length;
+        for (int i = 0; i < n; i++)
+        {
+            double window = 0.5 - 0.5 * Math.Cos(2 * Math.PI * i / n);
+            double angle = 2 * Math.PI * frequency * i / sampleRate;
+            real += samples[i] * window * Math.Cos(angle);
+            imag -= samples[i] * window * Math.Sin(angle);
+            windowSum += window;
+        }
+
+        return 2 * Math.Sqrt(real * real + imag * imag) / windowSum;
+    }
+
     /// <summary>Processes a long buffer in blocks of <paramref name="blockFrames"/>, like an audio callback would.</summary>
     public static void ProcessInBlocks(float[] buffer, int channels, int blockFrames, Action<Memory<float>> process)
     {

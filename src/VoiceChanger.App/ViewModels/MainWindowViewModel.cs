@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VoiceChanger.Core.Audio;
 using VoiceChanger.Core.Effects;
+using VoiceChanger.Core.Graph;
 using VoiceChanger.Core.Settings;
 
 namespace VoiceChanger.App.ViewModels;
@@ -18,8 +19,8 @@ public sealed record LatencyOption(LatencyPreset Preset, string Name, string Des
 public sealed record AddEffectOption(string Name, string Description, IRelayCommand Command);
 
 /// <summary>
-/// State of the main window: device selection, the effect chain, the master switch and the
-/// audio engine's live status.
+/// State of the main window: device selection, the effect chain or the node graph, the master
+/// switch and the audio engine's live status.
 /// </summary>
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
@@ -27,9 +28,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private const double MeterFallDbPerTick = 1.2;
 
     private readonly AudioEngine _engine;
+    private readonly AudioGraph _graph = new();
+    private readonly GraphEngine _graphEngine;
     private readonly SettingsStore _settingsStore;
     private readonly EffectRegistry _registry;
+    private readonly NodeRegistry _nodeRegistry;
     private readonly DispatcherTimer _statusTimer;
+    private bool _graphInitialized;
     private bool _initializing = true;
     private bool _disposed;
 
@@ -37,8 +42,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _settingsStore = settingsStore;
         _registry = registry ?? EffectRegistry.Default;
+        _nodeRegistry = registry is null ? NodeRegistry.Default : NodeRegistry.CreateDefault(registry);
         _engine = new AudioEngine(backend);
         _engine.Faulted += OnEngineFaulted;
+        _graphEngine = new GraphEngine(backend, _graph);
+        _graphEngine.Faulted += OnGraphEngineFaulted;
 
         LatencyOptions =
         [
@@ -66,6 +74,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         LoadEffects(settings.Effects);
         LoadDevices(settings.InputDeviceId, settings.OutputDeviceId);
+
+        NodeEditor = new NodeEditorViewModel(_graph, _nodeRegistry, InputDevices, OutputDevices);
+        _graph.EffectsEnabled = EffectsEnabled;
+        if (settings.Graph is not null)
+        {
+            settings.Graph.RestoreInto(_graph, _nodeRegistry);
+            _graphInitialized = true;
+            ChooseAvailableDevices();
+        }
+
+        Mode = settings.Mode;
 
         StatusText = IsBackendSupported
             ? "Stopped. Pick your devices and press Start."
@@ -104,6 +123,40 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public string BackendName { get; }
 
     public bool IsBackendSupported { get; }
+
+    // ---------------------------------------------------------------- chain or nodes
+
+    /// <summary>Whether the window shows the effect chain or the node editor.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsChainMode))]
+    [NotifyPropertyChangedFor(nameof(IsNodeMode))]
+    public partial EditorMode Mode { get; set; }
+
+    public bool IsChainMode
+    {
+        get => Mode == EditorMode.Chain;
+        set
+        {
+            if (value)
+            {
+                Mode = EditorMode.Chain;
+            }
+        }
+    }
+
+    public bool IsNodeMode
+    {
+        get => Mode == EditorMode.Nodes;
+        set
+        {
+            if (value)
+            {
+                Mode = EditorMode.Nodes;
+            }
+        }
+    }
+
+    public NodeEditorViewModel NodeEditor { get; }
 
     // ---------------------------------------------------------------- effects (steps 2 and 4)
 
@@ -171,9 +224,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var input = SelectedInput;
         var output = SelectedOutput;
         LoadDevices(input?.Id, output?.Id);
+        if (_graphInitialized)
+        {
+            ChooseAvailableDevices();
+        }
 
         // A device that disappeared was replaced by another one: move the running audio over.
-        if (IsRunning && (SelectedInput != input || SelectedOutput != output))
+        if (IsRunning && Mode == EditorMode.Chain && (SelectedInput != input || SelectedOutput != output))
         {
             Start();
         }
@@ -204,6 +261,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public void Start()
     {
         ErrorMessage = null;
+        if (Mode == EditorMode.Nodes)
+        {
+            StartGraph();
+            return;
+        }
+
         if (SelectedInput is null || SelectedOutput is null)
         {
             if (IsRunning)
@@ -218,24 +281,53 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             var options = AudioEngineOptions.FromPreset(SelectedLatency.Preset, MonoProcessing);
+            _graphEngine.Stop();
             _engine.Start(SelectedInput.Id, SelectedOutput.Id, options);
-            IsRunning = true;
-            _statusTimer.Start();
-            UpdateStatus();
+            OnStarted();
         }
         catch (Exception ex)
         {
-            IsRunning = false;
-            _statusTimer.Stop();
-            ClearLiveDisplays();
-            ErrorMessage = $"Could not start audio: {ex.Message}";
-            StatusText = "Stopped.";
+            OnStartFailed(ex);
         }
+    }
+
+    private void StartGraph()
+    {
+        try
+        {
+            var options = AudioEngineOptions.FromPreset(SelectedLatency.Preset, MonoProcessing);
+            _engine.Stop();
+            _graphEngine.Start(options);
+            OnStarted();
+        }
+        catch (Exception ex)
+        {
+            OnStartFailed(ex);
+        }
+    }
+
+    private void OnStarted()
+    {
+        IsRunning = true;
+        _statusTimer.Start();
+        UpdateStatus();
+    }
+
+    private void OnStartFailed(Exception ex)
+    {
+        _engine.Stop();
+        _graphEngine.Stop();
+        IsRunning = false;
+        _statusTimer.Stop();
+        ClearLiveDisplays();
+        ErrorMessage = $"Could not start audio: {ex.Message}";
+        StatusText = "Stopped.";
     }
 
     public void Stop()
     {
         _engine.Stop();
+        _graphEngine.Stop();
         IsRunning = false;
         _statusTimer.Stop();
         ClearLiveDisplays();
@@ -257,6 +349,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 OutputGainDb = (float)OutputGainDb,
                 EffectsEnabled = EffectsEnabled,
                 Effects = Effects.Select(CaptureEffect).ToList(),
+                Mode = Mode,
+                Graph = _graphInitialized ? GraphSettings.Capture(_graph) : null,
             });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -276,6 +370,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _statusTimer.Stop();
         _engine.Faulted -= OnEngineFaulted;
         _engine.Dispose();
+        _graphEngine.Faulted -= OnGraphEngineFaulted;
+        _graphEngine.Dispose();
         SaveSettings();
     }
 
@@ -293,7 +389,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnOutputGainDbChanged(double value) => _engine.OutputGainDb = (float)value;
 
-    partial void OnEffectsEnabledChanged(bool value) => _engine.Effects.IsEnabled = value;
+    partial void OnEffectsEnabledChanged(bool value)
+    {
+        _engine.Effects.IsEnabled = value;
+        _graph.EffectsEnabled = value;
+    }
+
+    partial void OnModeChanged(EditorMode value)
+    {
+        if (value == EditorMode.Nodes)
+        {
+            EnsureGraph();
+        }
+
+        // Keep playing, now through the other editor's signal path.
+        RestartIfRunning();
+    }
 
     private void RestartIfRunning()
     {
@@ -301,6 +412,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             Start();
         }
+    }
+
+    private void OnGraphEngineFaulted(object? sender, AudioStreamStoppedEventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            IsRunning = false;
+            _statusTimer.Stop();
+            ClearLiveDisplays();
+            StatusText = "Stopped.";
+            ErrorMessage = e.Error is InvalidOperationException
+                ? $"Audio stopped: {e.Error.Message}"
+                : $"An audio device stopped working: {e.Error?.Message} Check your devices and press Start again.";
+            RefreshDevices();
+        });
     }
 
     private void OnEngineFaulted(object? sender, AudioStreamStoppedEventArgs e)
@@ -319,6 +445,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>Refreshes meters, status text and live effect displays (called by a 30 Hz timer while running).</summary>
     internal void UpdateStatus()
     {
+        if (Mode == EditorMode.Nodes)
+        {
+            UpdateGraphStatus();
+            return;
+        }
+
         var status = _engine.GetStatus();
         if (!status.IsRunning)
         {
@@ -345,6 +477,30 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void UpdateGraphStatus()
+    {
+        var status = _graphEngine.GetStatus();
+        if (!status.IsRunning)
+        {
+            return;
+        }
+
+        LatencyText = $"≈ {status.EstimatedLatencyMilliseconds:0} ms";
+        string channels = status.Channels == 1 ? "mono" : "stereo";
+        string text = string.Create(
+            CultureInfo.CurrentCulture,
+            $"Running · {Plural(status.InputDevices, "input")} → {Plural(status.OutputDevices, "output")} · {status.SampleRate / 1000.0:0.#} kHz · processing in {channels} · delay ≈ {status.EstimatedLatencyMilliseconds:0} ms");
+        if (status.Underruns > 0)
+        {
+            text += $" · {Plural(status.Underruns, "dropout")} (try a safer latency setting)";
+        }
+
+        StatusText = text;
+        NodeEditor.Tick(isRunning: true);
+    }
+
+    private static string Plural(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
+
     private void ClearLiveDisplays()
     {
         InputLevelDb = MeterFloorDb;
@@ -353,6 +509,61 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         foreach (var effect in Effects)
         {
             effect.Tick(isRunning: false);
+        }
+
+        NodeEditor.Tick(isRunning: false);
+    }
+
+    // ---------------------------------------------------------------- node graph
+
+    /// <summary>The first time the node editor opens, the effect chain becomes its starting graph.</summary>
+    private void EnsureGraph()
+    {
+        if (_graphInitialized)
+        {
+            return;
+        }
+
+        _graphInitialized = true;
+        const double spacing = 280;
+        using (_graph.BeginUpdate())
+        {
+            _graph.Clear();
+            var input = _graph.Add(new InputDeviceNode { DeviceId = SelectedInput?.Id });
+            input.Gain.Value = (float)InputGainDb;
+            NodePort previous = input.Outputs[0];
+            double x = spacing;
+            foreach (var effect in Effects)
+            {
+                var copy = EffectSettings.Capture(effect.Effect).Restore(_registry);
+                if (copy is null)
+                {
+                    continue;
+                }
+
+                var node = _graph.Add(new EffectNode(copy) { X = x });
+                _graph.Connect(previous, node.Inputs[0]);
+                previous = node.Outputs[0];
+                x += spacing;
+            }
+
+            // A mixer before the output leaves room for more sources.
+            var mixer = _graph.Add(new MixerNode { X = x });
+            _graph.Connect(previous, mixer.Inputs[0]);
+            var output = _graph.Add(new OutputDeviceNode { DeviceId = SelectedOutput?.Id, X = x + spacing });
+            output.Volume.Value = (float)OutputGainDb;
+            _graph.Connect(mixer.Outputs[0], output.Inputs[0]);
+        }
+
+        ChooseAvailableDevices();
+    }
+
+    /// <summary>Device nodes whose device is missing switch to the default one, like the chain's device boxes.</summary>
+    private void ChooseAvailableDevices()
+    {
+        foreach (var node in NodeEditor.Nodes.OfType<DeviceNodeViewModel>())
+        {
+            node.ChooseAvailableDevice();
         }
     }
 

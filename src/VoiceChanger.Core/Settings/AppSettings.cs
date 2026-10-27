@@ -24,6 +24,12 @@ public sealed class AppSettings
 
     /// <summary>The effect chain, in processing order. <c>null</c> means "never saved" (first run).</summary>
     public List<EffectSettings>? Effects { get; set; }
+
+    /// <summary>Whether the window shows the effect chain or the node editor.</summary>
+    public EditorMode Mode { get; set; } = EditorMode.Chain;
+
+    /// <summary>The node graph. <c>null</c> until the node editor was opened for the first time.</summary>
+    public GraphSettings? Graph { get; set; }
 }
 
 /// <summary>Saved state of one effect in the chain.</summary>

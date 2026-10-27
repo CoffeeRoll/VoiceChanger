@@ -1,0 +1,53 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:VoiceChanger.App.ViewModels"
+             xmlns:views="using:VoiceChanger.App.Views"
+             xmlns:controls="using:VoiceChanger.App.Controls"
+             x:Class="VoiceChanger.App.Views.NodeEditorView"
+             x:DataType="vm:NodeEditorViewModel"
+             Focusable="True">
+
+  <!-- The canvas: a grid that pans and zooms with the nodes and the wires between them. -->
+  <Panel x:Name="Viewport" Background="Transparent" ClipToBounds="True">
+    <controls:CanvasGrid Zoom="{Binding Zoom}" PanX="{Binding PanX}" PanY="{Binding PanY}" IsHitTestVisible="False" />
+
+    <Panel x:Name="World">
+      <controls:WireLayer x:Name="WireLayer" Wires="{Binding Wires}" />
+      <!-- Nodes can sit anywhere, also outside the canvas's own bounds: nothing may clip them. -->
+      <ItemsControl x:Name="NodeItems" ItemsSource="{Binding Nodes}" ClipToBounds="False">
+        <ItemsControl.Template>
+          <ControlTemplate>
+            <ItemsPresenter ItemsPanel="{TemplateBinding ItemsPanel}" ClipToBounds="False" />
+          </ControlTemplate>
+        </ItemsControl.Template>
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <Canvas />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemContainerTheme>
+          <ControlTheme TargetType="ContentPresenter" x:DataType="vm:NodeViewModel">
+            <Setter Property="Canvas.Left" Value="{Binding X}" />
+            <Setter Property="Canvas.Top" Value="{Binding Y}" />
+            <Setter Property="ZIndex" Value="{Binding ZOrder}" />
+          </ControlTheme>
+        </ItemsControl.ItemContainerTheme>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:NodeViewModel">
+            <views:NodeView />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </Panel>
+
+    <StackPanel IsVisible="{Binding IsEmpty}" Spacing="6" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+      <TextBlock Classes="h2" Text="No nodes yet" HorizontalAlignment="Center" />
+      <TextBlock Classes="muted" Text="Right-click (or press Shift+A) to add an audio input, effects, a mixer and an output." HorizontalAlignment="Center" />
+    </StackPanel>
+
+    <Border Classes="canvasHelp" IsHitTestVisible="False">
+      <TextBlock Classes="label"
+                 Text="Drag from a socket to connect · Right-click or Shift+A to add · Scroll to zoom · Drag the background to move · Delete removes the selected node" />
+    </Border>
+  </Panel>
+</UserControl>
