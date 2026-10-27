@@ -27,16 +27,23 @@ pick an output, and hear the result live with low delay.
   - *High quality (phase vocoder)*: a phase-locked phase vocoder followed by resampling. It sounds
     smoother for large shifts and adds more delay.
 
+  Both move the formants (the resonances that make a voice recognisable) along with the pitch, like
+  playing a recording faster or slower: up sounds like a chipmunk, down like a slowed-down tape.
+
   **Preserve formants** keeps the character of your voice when you shift it, so an octave up sounds
-  like you singing higher rather than a chipmunk, and an octave down sounds like you rather than a
-  monster. It works by estimating the spectral envelope (the formants) of every frame and putting it
-  back where it was after the harmonics have moved. With it on, **Formant shift** moves the formants
-  on their own: negative values sound like a bigger person, positive values like a smaller one,
-  without changing the pitch. Formant preservation always uses the high quality algorithm, so it adds
-  about 20 ms more delay than the low latency one.
+  like you singing higher rather than a chipmunk, and an octave down like a deeper person rather than
+  a monster. It uses a pitch-synchronous algorithm made for voices (PSOLA): it finds every glottal
+  pulse of your voice and lays the pulses down again closer together or further apart. Each pulse
+  keeps its own shape, so the formants and the clear upper harmonics of your voice stay as they were,
+  and breath noise isn't dragged down into the voice. With it on, **Formant shift** moves the
+  formants on their own: negative values sound like a bigger person, positive values like a smaller
+  one, without changing the pitch. It adds about 35 ms of delay (about 15 ms more than the low
+  latency algorithm), and up to 45 ms with a large positive formant shift. It needs a single voice;
+  chords and music pass through unshifted.
 
   Presets: Higher voice, Lower voice, Chipmunk, Deep, Monster, Harmony, Detune, Natural octave up,
-  Natural octave down, Bigger voice, Smaller voice.
+  Natural octave down, Bigger voice, Smaller voice. *Lower voice*, *Deep* and the *Natural* and
+  *Bigger/Smaller voice* presets preserve formants; *Monster* deliberately doesn't.
 - **Auto Tune:** detects the pitch of your voice and pulls it to the nearest note of a key and scale.
   See [Auto Tune](#auto-tune) below.
 - Input and output **level meters**, input gain and output volume.

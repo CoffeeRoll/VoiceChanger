@@ -95,10 +95,19 @@ public class FormantTests
         return detector.Frequency;
     }
 
-    private static float[] RunVocoder(float[] signal, double ratio, bool preserve, double formantRatio = 1)
+    /// <summary>A plain pitch shift: the formants move with the pitch.</summary>
+    private static float[] RunVocoder(float[] signal, double ratio)
     {
-        var vocoder = new PhaseVocoder(2048, SampleRate) { Ratio = ratio, PreserveFormants = preserve, FormantRatio = formantRatio };
+        var vocoder = new PhaseVocoder(2048, SampleRate) { Ratio = ratio };
         ProcessInBlocks(signal, 1, 480, block => vocoder.Process(block.Span, 0, 1));
+        return signal;
+    }
+
+    /// <summary>A formant-preserving pitch shift, optionally with a formant shift of its own.</summary>
+    private static float[] RunPsola(float[] signal, double ratio, double formantRatio = 1)
+    {
+        var shifter = new PsolaPitchShifter(1, SampleRate) { Ratio = ratio, FormantRatio = formantRatio };
+        ProcessInBlocks(signal, 1, 480, block => shifter.Process(block.Span));
         return signal;
     }
 
@@ -112,8 +121,8 @@ public class FormantTests
     {
         double ratio = Math.Pow(2, semitones / 12.0);
 
-        var shifted = RunVocoder(Vowel(f0, 2), ratio, preserve: false);
-        var preserved = RunVocoder(Vowel(f0, 2), ratio, preserve: true);
+        var shifted = RunVocoder(Vowel(f0, 2), ratio);
+        var preserved = RunPsola(Vowel(f0, 2), ratio);
 
         // Without preservation the envelope moves with the pitch...
         Assert.InRange(EnvelopeError(shifted, f0 * ratio, f => Envelope(f / ratio)), 0, 1);
@@ -121,11 +130,40 @@ public class FormantTests
         // ...with it, the harmonics follow the original envelope instead.
         double kept = EnvelopeError(preserved, f0 * ratio, Envelope);
         double moved = EnvelopeError(preserved, f0 * ratio, f => Envelope(f / ratio));
-        Assert.InRange(kept, 0, 2.5);
+        // Whole octaves are almost exact (about 0.5 dB); between them neighbouring grains overlap by
+        // part of a period, which colours the envelope a little (about 3 dB for a high voice at -7).
+        Assert.InRange(kept, 0, 3.5);
         Assert.True(moved > kept + 2, $"kept {kept:0.0} dB, moved {moved:0.0} dB");
 
         // The pitch itself is still shifted.
         Assert.Equal(f0 * ratio, Pitch(preserved), f0 * ratio * 0.01);
+    }
+
+    [Theory]
+    [InlineData(440, 3)]
+    [InlineData(440, -5)]
+    [InlineData(330, 12)]
+    [InlineData(130, -12)]
+    public void Pitch_comes_out_exact_and_steady(double f0, int semitones)
+    {
+        // Marks and grains are placed with sub-sample precision: even a high voice, whose periods
+        // are only about a hundred samples long, comes out without period-to-period jitter.
+        double expected = f0 * Math.Pow(2, semitones / 12.0);
+        var output = RunPsola(Vowel(f0, 2), Math.Pow(2, semitones / 12.0));
+
+        var detector = new PitchDetector(SampleRate, windowSeconds: 0.02, hopSeconds: 0.0025);
+        var cents = new List<double>();
+        for (int offset = SampleRate / 2; offset < output.Length; offset += 120)
+        {
+            if (detector.Process(output.AsSpan(offset, 120)) && detector.IsVoiced)
+            {
+                cents.Add(1200 * Math.Log2(detector.Frequency / expected));
+            }
+        }
+
+        Assert.True(cents.Count > 300);
+        Assert.InRange(cents.Average(), -2, 2);
+        Assert.InRange(cents.Max() - cents.Min(), 0, 6);
     }
 
     [Theory]
@@ -134,7 +172,7 @@ public class FormantTests
     public void Formant_shift_moves_the_envelope_but_not_the_pitch(double formantSemitones)
     {
         double formantRatio = Math.Pow(2, formantSemitones / 12);
-        var output = RunVocoder(Vowel(160, 2), 1, preserve: true, formantRatio);
+        var output = RunPsola(Vowel(160, 2), 1, formantRatio);
 
         Assert.InRange(EnvelopeError(output, 160, f => Envelope(f / formantRatio)), 0, 2);
         Assert.True(EnvelopeError(output, 160, Envelope) > 2.5);
@@ -148,30 +186,85 @@ public class FormantTests
         double inputLevel = Rms(input.AsSpan(SampleRate));
         foreach (int semitones in new[] { 12, -12 })
         {
-            var output = RunVocoder((float[])input.Clone(), Math.Pow(2, semitones / 12.0), preserve: true);
+            var output = RunPsola((float[])input.Clone(), Math.Pow(2, semitones / 12.0));
             Assert.InRange(Rms(output.AsSpan(SampleRate)) / inputLevel, 0.5, 2);
         }
     }
 
+    [Theory]
+    [InlineData(110, -12)]
+    [InlineData(110, -7)]
+    [InlineData(210, -12)]
+    [InlineData(210, -5)]
+    public void A_breathy_voice_keeps_its_clarity_when_shifted_down(double f0, int semitones)
+    {
+        // Real voices have weak, noisy harmonics at the top. A spectral method has to rebuild the
+        // upper formants of a lower voice from exactly that region, which used to turn them into
+        // breath noise (or leave them out). Moving pulses instead keeps them as clear as in a real
+        // voice at the lower pitch.
+        double ratio = Math.Pow(2, semitones / 12.0);
+        var input = SyntheticVoice.Generate(3, t => SyntheticVoice.Speech(t, f0), SyntheticVoice.Vowels);
+        var ideal = SyntheticVoice.Generate(3, t => SyntheticVoice.Speech(t, f0) * ratio, SyntheticVoice.Vowels);
+        var output = RunPsola((float[])input.Clone(), ratio);
+
+        // The upper formants (1.5 to 4 kHz) keep their share of the sound...
+        double expected = SyntheticVoice.BandShareDb(ideal, 1500, 4000);
+        Assert.InRange(SyntheticVoice.BandShareDb(output, 1500, 4000), expected - 3, expected + 3);
+
+        // ...and are as harmonic as in a real voice at that pitch, overall and above 1 kHz.
+        Assert.True(SyntheticVoice.Periodicity(output) > SyntheticVoice.Periodicity(ideal) - 1.5);
+        Assert.True(SyntheticVoice.Periodicity(output, 1000) > SyntheticVoice.Periodicity(ideal, 1000) - 1.5);
+    }
+
     [Fact]
-    public void Effect_switches_to_the_phase_vocoder_when_preserving_formants()
+    public void Breath_and_silence_pass_through_unchanged()
+    {
+        // Noise has no pulses to move, so it comes out as it went in (just delayed).
+        var noise = new float[SampleRate];
+        var random = new Random(5);
+        for (int i = 0; i < noise.Length; i++)
+        {
+            noise[i] = (float)(0.1 * (random.NextDouble() * 2 - 1));
+        }
+
+        var shifter = new PsolaPitchShifter(1, SampleRate) { Ratio = 0.5 };
+        var output = (float[])noise.Clone();
+        ProcessInBlocks(output, 1, 480, block => shifter.Process(block.Span));
+
+        int delay = shifter.LatencyFrames;
+        double error = 0, energy = 0;
+        for (int i = SampleRate / 4; i < noise.Length; i++)
+        {
+            double difference = output[i] - noise[i - delay];
+            error += difference * difference;
+            energy += noise[i - delay] * noise[i - delay];
+        }
+
+        Assert.True(error < energy * 1e-6, $"error {10 * Math.Log10(error / energy):0} dB");
+    }
+
+    [Fact]
+    public void Effect_switches_to_the_voice_algorithm_when_preserving_formants()
     {
         var effect = new PitchShiftEffect();
-        effect.Semitones.Value = 12;
+        effect.Semitones.Value = -12;
         effect.Prepare(SampleRate, 1);
         Assert.Equal(PitchShiftEffect.GranularMode, effect.EffectiveMode);
         int granularLatency = effect.LatencyFrames;
 
         effect.PreserveFormants.Value = 1;
-        Assert.Equal(PitchShiftEffect.PhaseVocoderMode, effect.EffectiveMode);
-        Assert.Equal(PhaseVocoder.LatencyFor(2048), effect.LatencyFrames);
+        Assert.Equal(PitchShiftEffect.FormantMode, effect.EffectiveMode);
+        Assert.Equal(new PsolaPitchShifter(1, SampleRate).LatencyFrames, effect.LatencyFrames);
+        Assert.InRange(effect.LatencyFrames * 1000.0 / SampleRate, 25, 40);
         Assert.True(effect.LatencyFrames > granularLatency);
 
-        // The algorithm choice no longer applies, the formant shift now does.
+        // The algorithm choice and window no longer apply, the formant shift now does.
         Assert.False(effect.Mode.IsAvailable);
+        Assert.False(effect.WindowMilliseconds.IsAvailable);
         Assert.True(effect.FormantShift.IsAvailable);
         effect.PreserveFormants.Value = 0;
         Assert.True(effect.Mode.IsAvailable);
+        Assert.True(effect.WindowMilliseconds.IsAvailable);
         Assert.False(effect.FormantShift.IsAvailable);
     }
 
@@ -214,5 +307,16 @@ public class FormantTests
         effect.ApplyPreset(effect.Presets.Single(p => p.Name == "Bigger voice"));
         Assert.Equal(-3, effect.FormantShift.Value);
         Assert.Equal("Bigger voice", effect.FindMatchingPreset()?.Name);
+
+        // Voices that are simply lower keep sounding like a person, not a slowed-down recording.
+        foreach (string name in new[] { "Lower voice", "Deep", "Natural octave down" })
+        {
+            effect.ApplyPreset(effect.Presets.Single(p => p.Name == name));
+            Assert.True(effect.Semitones.Value < 0);
+            Assert.True(effect.PreserveFormants.BoolValue, name);
+        }
+
+        effect.ApplyPreset(effect.Presets.Single(p => p.Name == "Monster"));
+        Assert.False(effect.PreserveFormants.BoolValue);
     }
 }
