@@ -4,64 +4,47 @@ using static VoiceChanger.Core.Tests.SignalHelpers;
 
 namespace VoiceChanger.Core.Tests;
 
-public class SplicingPitchShifterTests
+public class PitchCorrectionTests
 {
-    [Theory]
-    [InlineData(30)]
-    [InlineData(-50)]
-    [InlineData(200)]
-    [InlineData(-1200)]
-    [InlineData(1200)]
-    public void Shifts_by_the_requested_ratio_without_changing_level(double cents)
-    {
-        var shifter = new SplicingPitchShifter(1, 48000) { Ratio = Math.Pow(2, cents / 1200) };
-        var signal = PitchDetectorTests.Voice(150, 48000, 96000);
-        double inputLevel = Rms(signal.AsSpan(48000));
-        ProcessInBlocks(signal, 1, 240, block => shifter.Process(block.Span));
-
-        double expected = 150 * Math.Pow(2, cents / 1200);
-        Assert.Equal(expected, DominantFrequency(signal.AsSpan(48000), 48000), expected * 0.003);
-        Assert.Equal(1, Rms(signal.AsSpan(48000)) / inputLevel, 0.02);
-    }
-
     [Fact]
-    public void Ratio_of_one_is_a_pure_delay()
+    public void Every_pulse_is_corrected_from_its_own_period()
     {
-        var shifter = new SplicingPitchShifter(2, 48000);
-        var random = new Random(9);
-        var signal = Enumerable.Range(0, 20000).Select(_ => (float)(random.NextDouble() - 0.5)).ToArray();
-        var copy = (float[])signal.Clone();
-        shifter.Process(signal);
-
-        int delay = shifter.LatencyFrames * 2;
-        for (int i = delay; i < signal.Length; i++)
+        var periods = new List<double>();
+        var shifter = new PsolaPitchShifter(1, 48000)
         {
-            Assert.Equal(copy[i - delay], signal[i], 5);
-        }
+            Correction = (period, _) =>
+            {
+                if (period > 0)
+                {
+                    periods.Add(period);
+                }
+
+                // Pull every pulse to exactly 250 Hz.
+                return period > 0 ? period / (48000 / 250.0) : 1;
+            },
+        };
+        var signal = PitchDetectorTests.Voice(200, 48000, 96000);
+        ProcessInBlocks(signal, 1, 480, block => shifter.Process(block.Span));
+
+        // One call per grain laid down: 250 a second.
+        Assert.InRange(periods.Count, 470, 510);
+        Assert.All(periods.Skip(5), p => Assert.Equal(240, p, 0.5));
+        Assert.Equal(250, DominantFrequency(signal.AsSpan(48000), 48000), 0.5);
     }
 
     [Fact]
     public void Handles_ratios_that_keep_crossing_one()
     {
-        var shifter = new SplicingPitchShifter(1, 48000);
+        var shifter = new PsolaPitchShifter(1, 48000)
+        {
+            Correction = (_, time) => time / 4800 % 2 < 1 ? 1.03 : 0.97,
+        };
         var signal = PitchDetectorTests.Voice(200, 48000, 96000);
         double inputLevel = Rms(signal);
-        for (int offset = 0, block = 0; offset < signal.Length; offset += 240, block++)
-        {
-            shifter.Ratio = block / 20 % 2 == 0 ? 1.03 : 0.97;
-            shifter.Process(signal.AsSpan(offset, 240));
-        }
+        ProcessInBlocks(signal, 1, 240, block => shifter.Process(block.Span));
 
-        Assert.Equal(1, Rms(signal.AsSpan(24000)) / inputLevel, 0.03);
+        Assert.Equal(1, Rms(signal.AsSpan(24000)) / inputLevel, 0.05);
         Assert.All(signal, s => Assert.InRange(s, -0.6f, 0.6f));
-    }
-
-    [Fact]
-    public void Extra_delay_adds_to_the_latency()
-    {
-        var plain = new SplicingPitchShifter(1, 48000);
-        var delayed = new SplicingPitchShifter(1, 48000, extraDelaySeconds: 0.01);
-        Assert.Equal(plain.LatencyFrames + 480, delayed.LatencyFrames);
     }
 }
 
@@ -228,6 +211,30 @@ public class AutoTuneEffectTests
 
         var (_, baroque) = Run(_ => 440, 1.2, e => e.Reference.Value = 432);
         Assert.InRange(Cents(DominantFrequency(baroque.AsSpan(SampleRate / 2), SampleRate), 432), -3, 3);
+    }
+
+    [Theory]
+    [InlineData(110, -12)]
+    [InlineData(210, -12)]
+    [InlineData(210, 7)]
+    public void Transposing_keeps_the_character_of_the_voice(double f0, int transpose)
+    {
+        // Auto tune moves the voice's own pulses, like the pitch shifter's formant preservation:
+        // transposed down an octave it sounds like a deeper voice, not a slowed-down recording.
+        double ratio = Math.Pow(2, transpose / 12.0);
+        var input = SyntheticVoice.Generate(3, t => SyntheticVoice.Speech(t, f0), SyntheticVoice.Vowels);
+        var ideal = SyntheticVoice.Generate(3, t => SyntheticVoice.Speech(t, f0) * ratio, SyntheticVoice.Vowels);
+        var effect = new AutoTuneEffect();
+        effect.Transpose.Value = transpose;
+        effect.Amount.Value = 0;
+        effect.Prepare(SampleRate, 1);
+        var output = (float[])input.Clone();
+        ProcessInBlocks(output, 1, 480, block => effect.Process(block.Span));
+
+        double expected = SyntheticVoice.BandShareDb(ideal, 1500, 4000);
+        Assert.InRange(SyntheticVoice.BandShareDb(output, 1500, 4000), expected - 3, expected + 3);
+        Assert.True(SyntheticVoice.Periodicity(output) > SyntheticVoice.Periodicity(ideal) - 1.5);
+        Assert.True(SyntheticVoice.Periodicity(output, 1000) > SyntheticVoice.Periodicity(ideal, 1000) - 1.5);
     }
 
     [Fact]

@@ -1,6 +1,14 @@
 namespace VoiceChanger.Core.Dsp;
 
 /// <summary>
+/// Chooses the pitch ratio for one grain of a <see cref="PsolaPitchShifter"/>.
+/// </summary>
+/// <param name="period">Period of the pulse the grain is cut around, in samples, or 0 for unvoiced audio.</param>
+/// <param name="time">Position of the grain in the output stream, in samples.</param>
+/// <returns>Output pitch divided by input pitch for this grain.</returns>
+public delegate double PitchCorrection(double period, double time);
+
+/// <summary>
 /// Formant-preserving pitch shifter for voices: pitch-synchronous overlap-add (TD-PSOLA,
 /// E. Moulines and F. Charpentier, 1990).
 /// <para>
@@ -100,6 +108,15 @@ public sealed class PsolaPitchShifter
         get => _ratio;
         set => _ratio = Math.Clamp(value, 0.25, 4.0);
     }
+
+    /// <summary>
+    /// When set, called for every grain to choose its ratio instead of <see cref="Ratio"/>. It gets
+    /// the measured period of the very pulse being moved, so a pitch correction lands exactly on
+    /// time; and since a grain's spacing is that period divided by the ratio, a correction to a
+    /// target pitch comes out exactly at that pitch even if the period was measured slightly off.
+    /// Runs on the audio thread.
+    /// </summary>
+    public PitchCorrection? Correction { get; set; }
 
     /// <summary>
     /// How far the formants move, as a frequency ratio (1 = they stay put; 0.5 to 2). Raising it
@@ -245,7 +262,13 @@ public sealed class PsolaPitchShifter
                 // pitch is exact even though marks fall on whole samples.
                 double curvature = before - 2 * bestScore + after;
                 double offset = best > low && curvature < 0 ? Math.Clamp(0.5 * (before - after) / curvature, -0.5, 0.5) : 0;
-                AddMark(best, offset, best + offset - (_lastMark + _lastOffset), voiced: true);
+
+                // The search compared whole-sample positions, so it measured the period from the
+                // last mark's whole sample; the exact mark keeps the last mark's fraction on top.
+                double measured = best + offset - _lastMark;
+                double exact = best + offset + _lastOffset;
+                long nearest = (long)Math.Round(exact);
+                AddMark(nearest, exact - nearest, measured, voiced: true);
                 return true;
             }
 
@@ -263,7 +286,7 @@ public sealed class PsolaPitchShifter
         int onset = EstimatePeriod(position);
         if (onset > 0)
         {
-            StartVoice(position, onset);
+            StartVoice(position, RefinePeriod(position, onset));
             return true;
         }
 
@@ -276,8 +299,9 @@ public sealed class PsolaPitchShifter
     /// point in the latest period, then replaces the unvoiced marks that are not in use yet by
     /// pulse marks going back to where the voice began.
     /// </summary>
-    private void StartVoice(long position, int period)
+    private void StartVoice(long position, double exactPeriod)
     {
+        int period = (int)Math.Round(exactPeriod);
         long anchor = position - period;
         float loudest = -1;
         for (long p = position - period; p < position; p++)
@@ -323,10 +347,10 @@ public sealed class PsolaPitchShifter
 
         for (int i = count - 1; i >= 0; i--)
         {
-            AddMark(earlier[i], 0, period, voiced: true);
+            AddMark(earlier[i], 0, exactPeriod, voiced: true);
         }
 
-        AddMark(anchor, 0, period, voiced: true);
+        AddMark(anchor, 0, exactPeriod, voiced: true);
     }
 
     private Mark Last => _marks[(_markStart + _markCount - 1) % MaxMarks];
@@ -406,6 +430,37 @@ public sealed class PsolaPitchShifter
         return 0;
     }
 
+    /// <summary>
+    /// Sharpens a coarse period estimate to a fraction of a sample: the lag around it at which the
+    /// last period best matches the one before, refined with a parabola through the peak.
+    /// </summary>
+    private double RefinePeriod(long position, int coarse)
+    {
+        int low = Math.Max(_minPeriod, coarse - 2 * _stride);
+        int high = Math.Min(_maxPeriod, coarse + 2 * _stride);
+        int best = coarse;
+        double bestScore = double.NegativeInfinity;
+        for (int lag = low; lag <= high; lag++)
+        {
+            double score = Correlation(position, position - lag, lag);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = lag;
+            }
+        }
+
+        if (best <= low || best >= high)
+        {
+            return best;
+        }
+
+        double before = Correlation(position, position - (best - 1), best - 1);
+        double after = Correlation(position, position - (best + 1), best + 1);
+        double curvature = before - 2 * bestScore + after;
+        return curvature < 0 ? best + Math.Clamp(0.5 * (before - after) / curvature, -0.5, 0.5) : best;
+    }
+
     private void AddMark(long position, double offset, double period, bool voiced)
     {
         _marks[(_markStart + _markCount) % MaxMarks] = new Mark(position, offset, period, voiced);
@@ -450,8 +505,11 @@ public sealed class PsolaPitchShifter
 
         // Voiced grains move to the new pulse rate (keeping the loudness of the voice the same);
         // unvoiced ones stay where they are. Both mark and grain positions have sub-sample precision.
-        double spacing = mark.Voiced ? half / _ratio : half;
-        float gain = mark.Voiced ? (float)Math.Sqrt(1 / _ratio) : 1f;
+        double ratio = Correction is { } correction
+            ? Math.Clamp(correction(mark.Voiced ? half : 0, output), 0.25, 4.0)
+            : _ratio;
+        double spacing = mark.Voiced ? half / ratio : half;
+        float gain = mark.Voiced ? (float)Math.Sqrt(1 / ratio) : 1f;
         double centre = mark.Position + mark.Offset;
         long firstWritable = _written - 1 - _latency;
         int write = (int)((_written - 1) & _inputMask);

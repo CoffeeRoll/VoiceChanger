@@ -21,9 +21,14 @@ public readonly record struct AutoTuneReading(
     double ReferenceA4);
 
 /// <summary>
-/// Pitch correction: detects the pitch of the voice and bends it to the nearest note of a key and
-/// scale. A fast retune speed gives the hard, robotic "auto-tune" sound; a slower one corrects
-/// gently and keeps natural vibrato.
+/// Pitch correction: bends the voice to the nearest note of a key and scale. A fast retune speed
+/// gives the hard, robotic "auto-tune" sound; a slower one corrects gently and keeps natural vibrato.
+/// <para>
+/// It runs on the voice algorithm of the pitch shifter (<see cref="PsolaPitchShifter"/>), which
+/// measures the period of every glottal pulse it moves. Each pulse is corrected from its own
+/// period, so corrections land exactly on time without a separate pitch detector, a hard tune
+/// comes out exactly on the note, and transposing keeps the character (formants) of the voice.
+/// </para>
 /// </summary>
 public sealed class AutoTuneEffect : AudioEffect
 {
@@ -32,23 +37,13 @@ public sealed class AutoTuneEffect : AudioEffect
     /// <summary>C major: the custom scale starts from these notes until others are picked.</summary>
     public const int DefaultCustomNotes = 0b1010_1011_0101;
 
-    private const double ChunkSeconds = 0.005;
-
-    // A short detection window and hop keep the analysis recent. The detector still reports a pitch
-    // about 30 ms after it was sung, so the audio is delayed by the same amount; otherwise fast
-    // corrections arrive late and vibrato is only partly removed (measured: 40 cents of vibrato is
-    // reduced to about 2 cents with an instant retune).
-    private const double DetectionWindowSeconds = 0.025;
-    private const double DetectionHopSeconds = 0.005;
-    private const double AlignmentDelaySeconds = 0.016;
     private const double HoldSeconds = 0.12;
     private const double ReleaseSeconds = 0.05;
     private const double Hysteresis = 0.2;
+    private const int DisplayPeriods = 4;
 
-    private PitchDetector? _detector;
-    private SplicingPitchShifter? _shifter;
-    private float[] _mono = [];
-    private int _chunkFrames;
+    private readonly double[] _recentPeriods = new double[DisplayPeriods];
+    private PsolaPitchShifter? _shifter;
 
     // Settings, refreshed in OnParametersChanged.
     private int _mask = 0xFFF;
@@ -57,12 +52,16 @@ public sealed class AutoTuneEffect : AudioEffect
     private int _transpose;
     private double _reference = 440;
 
-    // Audio thread state.
+    // Audio thread state, updated for every grain.
     private int? _heldTarget;
     private double _inputNote;
     private double _tuning;
     private double _applied;
     private double _unvoicedSeconds = HoldSeconds;
+    private double _lastGrainTime = double.NaN;
+    private bool _voiced;
+    private int _recentWrite;
+    private int _recentCount;
     private long _sequence;
 
     // Seqlock-protected reading for the UI thread.
@@ -96,7 +95,7 @@ public sealed class AutoTuneEffect : AudioEffect
         Transpose = AddParameter(EffectParameter.Integer(
             "transpose", "Transpose", -12, 12, 0, "st",
             formatter: v => MusicalScale.FormatInterval((int)MathF.Round(v)),
-            description: "Moves the corrected notes up or down."));
+            description: "Moves the corrected notes up or down. Your voice keeps its character, like with the pitch shifter's Preserve formants."));
         Reference = AddParameter(EffectParameter.Integer(
             "reference", "Tuning (A4)", 430, 450, 440, "Hz",
             formatter: v => v.ToString("0", CultureInfo.CurrentCulture) + " Hz",
@@ -173,13 +172,8 @@ public sealed class AutoTuneEffect : AudioEffect
         }
     }
 
-    protected override void OnPrepare()
-    {
-        _detector = new PitchDetector(SampleRate, windowSeconds: DetectionWindowSeconds, hopSeconds: DetectionHopSeconds);
-        _shifter = new SplicingPitchShifter(Channels, SampleRate, AlignmentDelaySeconds);
-        _mono = new float[EffectChain.MaxBlockFrames];
-        _chunkFrames = Math.Max(32, (int)(ChunkSeconds * SampleRate));
-    }
+    protected override void OnPrepare() =>
+        _shifter = new PsolaPitchShifter(Channels, SampleRate) { Correction = Correct };
 
     protected override void OnParametersChanged()
     {
@@ -198,73 +192,44 @@ public sealed class AutoTuneEffect : AudioEffect
 
     protected override void OnReset()
     {
-        _detector?.Reset();
         _shifter?.Reset();
         _heldTarget = null;
         _tuning = 0;
         _applied = _transpose;
         _unvoicedSeconds = HoldSeconds;
+        _lastGrainTime = double.NaN;
+        _voiced = false;
+        _recentCount = 0;
     }
 
     protected override void ProcessCore(Span<float> interleaved)
     {
-        int channels = Channels;
-        int frames = interleaved.Length / channels;
-        if (_mono.Length < _chunkFrames)
-        {
-            _mono = new float[_chunkFrames];
-        }
-
-        for (int offset = 0; offset < frames; offset += _chunkFrames)
-        {
-            int count = Math.Min(_chunkFrames, frames - offset);
-            var block = interleaved.Slice(offset * channels, count * channels);
-
-            // Analyse the incoming (uncorrected) voice.
-            if (channels == 1)
-            {
-                _detector!.Process(block);
-            }
-            else
-            {
-                float scale = 1f / channels;
-                for (int frame = 0; frame < count; frame++)
-                {
-                    float sum = 0;
-                    for (int ch = 0; ch < channels; ch++)
-                    {
-                        sum += block[frame * channels + ch];
-                    }
-
-                    _mono[frame] = sum * scale;
-                }
-
-                _detector!.Process(_mono.AsSpan(0, count));
-            }
-
-            UpdateCorrection((double)count / SampleRate);
-            _shifter!.Ratio = Math.Pow(2, _applied / 12);
-            _shifter.Process(block);
-        }
-
+        _shifter!.Process(interleaved);
         Publish();
     }
 
-    private void UpdateCorrection(double seconds)
+    /// <summary>Chooses the pitch of one grain (one pulse of the voice, or a slice of unvoiced audio).</summary>
+    private double Correct(double period, double time)
     {
-        bool voiced = _detector!.IsVoiced;
-        if (voiced)
+        double seconds = double.IsNaN(_lastGrainTime) ? 0 : (time - _lastGrainTime) / SampleRate;
+        _lastGrainTime = time;
+        _voiced = period > 0;
+        if (_voiced)
         {
-            _inputNote = MusicalScale.FrequencyToNote(_detector.Frequency, _reference);
+            _inputNote = MusicalScale.FrequencyToNote(SampleRate / period, _reference);
             int target = MusicalScale.Nearest(_inputNote, _mask, _heldTarget, Hysteresis);
             _heldTarget = target;
             _tuning = target - _inputNote;
             _unvoicedSeconds = 0;
+            _recentPeriods[_recentWrite] = period;
+            _recentWrite = (_recentWrite + 1) % DisplayPeriods;
+            _recentCount = Math.Min(_recentCount + 1, DisplayPeriods);
         }
         else
         {
-            // Bridge short detection gaps; after that, let go of the correction gently.
+            // Bridge short gaps (consonants); after that, let go of the correction gently.
             _unvoicedSeconds += seconds;
+            _recentCount = 0;
             if (_unvoicedSeconds > HoldSeconds)
             {
                 _tuning = 0;
@@ -276,16 +241,25 @@ public sealed class AutoTuneEffect : AudioEffect
         double timeConstant = _unvoicedSeconds > HoldSeconds ? Math.Max(_retuneSeconds, ReleaseSeconds) : _retuneSeconds;
         double step = timeConstant <= 0 ? 1 : 1 - Math.Exp(-seconds / timeConstant);
         _applied += (desired - _applied) * step;
+        return Math.Pow(2, _applied / 12);
     }
 
     private void Publish()
     {
-        bool voiced = _detector!.IsVoiced;
+        // The display shows the pitch averaged over the last few pulses.
+        bool voiced = _voiced && _recentCount > 0;
+        double period = 0;
+        for (int i = 0; i < _recentCount; i++)
+        {
+            period += _recentPeriods[(_recentWrite - 1 - i + DisplayPeriods) % DisplayPeriods];
+        }
+
+        double frequency = voiced ? SampleRate * _recentCount / period : 0;
         var reading = new AutoTuneReading(
             Sequence: ++_sequence,
             IsVoiced: voiced,
-            InputFrequency: voiced ? _detector.Frequency : 0,
-            InputNote: voiced ? _inputNote : double.NaN,
+            InputFrequency: frequency,
+            InputNote: voiced ? MusicalScale.FrequencyToNote(frequency, _reference) : double.NaN,
             TargetNote: voiced && _heldTarget is int target ? target + _transpose : 0,
             OutputNote: voiced ? _inputNote + _applied : double.NaN,
             ReferenceA4: _reference);
