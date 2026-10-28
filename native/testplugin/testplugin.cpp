@@ -9,6 +9,12 @@
 // makes the window ask the host for that width; a click in the window turns the gain up (an edit
 // the host hears of); "Editor Scale" shows the scale factor the host gave the window.
 
+#if defined(_WIN32)
+// Before anything includes windows.h: no min and max macros.
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#endif
+
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/base/ibstream.h"
 #include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
