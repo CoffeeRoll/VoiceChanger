@@ -98,12 +98,36 @@ FUnknown* hostContext()
 std::mutex modulesLock;
 std::map<std::string, std::weak_ptr<VST3::Hosting::Module>> modules;
 
+// The module to load from a bundle. The SDK looks in the bundle's folder for this process's
+// architecture; an ARM64X binary (arm64x-win) loads into ARM64 and x64 processes alike, so a bundle
+// with only that one is loaded from it directly.
+std::string modulePath(const std::string& path)
+{
+#if defined(_WIN32)
+    namespace fs = std::filesystem;
+    std::error_code ignored;
+    fs::path bundle = fs::u8path(path);
+    if (!fs::is_directory(bundle, ignored))
+        return path;
+#if defined(_M_ARM64)
+    const char* native = "arm64-win";
+#else
+    const char* native = "x86_64-win";
+#endif
+    fs::path contents = bundle / "Contents";
+    fs::path arm64x = contents / "arm64x-win" / bundle.filename();
+    if (!fs::exists(contents / native, ignored) && fs::exists(arm64x, ignored))
+        return arm64x.u8string();
+#endif
+    return path;
+}
+
 VST3::Hosting::Module::Ptr loadModule(const std::string& path, std::string& error)
 {
     std::lock_guard<std::mutex> lock(modulesLock);
     if (auto existing = modules[path].lock())
         return existing;
-    auto module = VST3::Hosting::Module::create(path, error);
+    auto module = VST3::Hosting::Module::create(modulePath(path), error);
     if (module)
         modules[path] = module;
     return module;

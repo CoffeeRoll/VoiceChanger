@@ -113,17 +113,6 @@ public sealed class PluginCatalog(string cachePath)
     /// <summary>Whether each plug-in runs in a process of its own (the safer way).</summary>
     public bool SeparateProcesses { get; set; } = true;
 
-    /// <summary>
-    /// Scans in a separate process: the running app started again with
-    /// <see cref="PluginScanner.Command"/>, so a plug-in that crashes while loading can't take the
-    /// app with it.
-    /// </summary>
-    public static IReadOnlyList<PluginInfo> ScanWithThisApp(string modulePath)
-    {
-        var command = PluginHostCommand.ThisApp() ?? throw new PluginException("The app's path is unknown.");
-        return PluginScanner.ScanInSeparateProcess(modulePath, command.Executable, command.Arguments);
-    }
-
     /// <summary>Adds a folder to look for plug-ins in. Returns false when it is already one of them.</summary>
     public bool AddFolder(string folder)
     {

@@ -15,13 +15,18 @@ public sealed class PluginService
     private readonly PluginHostCommand? _hostCommand;
     private PluginHosting _hosting;
 
-    public PluginService(PluginCatalog catalog, EffectRegistry registry, PluginHostCommand? hostCommand, Func<string, IReadOnlyList<PluginInfo>> scan)
+    /// <summary>
+    /// Plug-ins from <paramref name="catalog"/>, hosted (when in processes of their own) by
+    /// <paramref name="hostCommand"/>; <paramref name="scan"/> scans a module, by default in a
+    /// separate process of the right architecture.
+    /// </summary>
+    public PluginService(PluginCatalog catalog, EffectRegistry registry, PluginHostCommand? hostCommand, Func<string, IReadOnlyList<PluginInfo>>? scan = null)
     {
         Catalog = catalog;
         Registry = registry;
         _hostCommand = hostCommand;
-        _scan = scan;
         _hosting = MakeHosting();
+        _scan = scan ?? (path => _hosting.Scan(path));
         IsAvailable = PluginEffect.IsBridgeAvailable(out string? problem);
         Problem = problem;
         SyncRegistry();
@@ -68,7 +73,7 @@ public sealed class PluginService
     {
         var catalog = new PluginCatalog(cachePath);
         catalog.Load();
-        return new PluginService(catalog, EffectRegistry.CreateDefault(), PluginHostCommand.ThisApp(), PluginCatalog.ScanWithThisApp);
+        return new PluginService(catalog, EffectRegistry.CreateDefault(), PluginHostCommand.ThisApp());
     }
 
     /// <summary>
@@ -159,6 +164,7 @@ public sealed class PluginService
     {
         SeparateProcesses = Catalog.SeparateProcesses && _hostCommand is not null,
         HostCommand = _hostCommand,
+        Helpers = PluginHostCommand.Helpers(),
     };
 
     /// <summary>Registers the catalogue's plug-ins and takes out the ones that are gone or blocked.</summary>

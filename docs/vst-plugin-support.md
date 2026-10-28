@@ -1,6 +1,6 @@
 # Spec: hosting third-party VST3 plugins
 
-Status: M1 implemented (see [section 15](#15-m1-as-built)) · Scope: Windows, effect plugins · Last updated: 2026-10-28
+Status: M1–M3 implemented (see sections [15](#15-m1-as-built) and [16](#16-m2-and-m3-as-built)) · Scope: Windows, effect plugins · Last updated: 2026-10-29
 
 ## 1. Summary
 
@@ -330,3 +330,40 @@ Milestone M1 ("plugins play") is implemented. Where it differs from the plan abo
   that changes the latency, an on/off side-chain mix with a mono auxiliary bus, a stepped
   sample-and-hold, a bypass, state, and a hidden "crash" switch for the crash-guard test (Windows).
   CI builds `native/` with CMake on Windows and Linux before the .NET build.
+
+## 16. M2 and M3 as built
+
+- **Instances:** `PluginEffect` works through `IPluginInstance`: `LocalPlugin` (the bridge in this
+  process) or `RemotePlugin` (a host process). Audio and parameter changes live in `PluginBuffers`,
+  pinned memory for a local plugin and shared memory for a remote one, so neither copies the audio.
+  Changes that don't fit a block (512) go with the next; program changes go first in a block, and
+  choosing a program drops edits the processor hasn't had yet.
+- **Editors (M2):** the bridge (API version 2) opens the plugin's `IPlugView` in a host window and
+  passes on resize requests (`IPlugFrame::resizeView`), size constraints and the content scale.
+  `PluginEditorWindow` is a plain Win32 top-level window owned by the main window: it follows the
+  plugin's size, lets the user resize within the plugin's limits, and handles `WM_DPICHANGED`. Edits
+  in the window come back through `performEdit` and are queued for the processor. Windows only.
+- **Presets (M2):** the root unit's program list (`IUnitInfo`) and the `.vstpreset` files in the VST3
+  preset folders (vendor/plugin, sub-folders included) are the effect's presets; `AudioEffect`'s
+  `ApplyPreset` and `FindMatchingPreset` became virtual for them. `SavePreset` writes a file.
+- **Plugin manager (M2):** extra folders, rescan, modules that failed (with *Try again*), the block
+  list, and the separate-process setting, all kept in `plugins.json`. A plugin given up after
+  crashing is blocked automatically. Side-chain sockets came with M1.
+- **Out-of-process host (M3):** one host process per plugin instance: the app itself run with
+  `--plugin-host` (keeping the app a single file), or `VoiceChanger.PluginHost`. Requests and events
+  go over two anonymous pipes (not stdout, which plugins sometimes print to); audio goes through a
+  shared-memory block (a named mapping on Windows, a file in `/dev/shm` elsewhere) with named
+  semaphores from the bridge for the handshake. Each block is handed over and back within the audio
+  callback. The host answers requests on its main thread, which also runs the plugin's window, and
+  processes on a "Pro Audio" (MMCSS) thread.
+- **Recovery (M3):** a host that crashes (or whose plugin crashes; the bridge's guard catches it), or
+  that doesn't answer a block within a second, is killed; the audio passes through while a new host
+  starts with the last saved state and the current parameter values. After three crashes within a
+  minute the plugin is given up and blocked.
+- **ARM64 (M3):** `PluginArchitectures` reads which architectures a bundle has binaries for (or a
+  single-file module's PE header). A plugin the app can't load runs in a helper of its architecture:
+  the ARM64 build ships `VoiceChanger.PluginHost-x64.exe` (under Windows' emulation), used for
+  scanning too. The bridge loads ARM64X (`arm64x-win`) binaries in both architectures.
+- **Not done:** 32-bit plugins (they would need a 32-bit helper), Linux and macOS editors, and
+  sharing one host process between trusted plugins.
+
