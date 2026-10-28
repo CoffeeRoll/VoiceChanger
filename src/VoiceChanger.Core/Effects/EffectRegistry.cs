@@ -55,6 +55,10 @@ public sealed class EffectRegistry
         _descriptors.Add(descriptor);
     }
 
+    /// <summary>Takes an effect type out (a plug-in that was blocked). Returns whether it was there.</summary>
+    public bool Unregister(string typeId) =>
+        _descriptors.RemoveAll(d => string.Equals(d.TypeId, typeId, StringComparison.OrdinalIgnoreCase)) > 0;
+
     public EffectDescriptor? Find(string typeId) =>
         _descriptors.FirstOrDefault(d => string.Equals(d.TypeId, typeId, StringComparison.OrdinalIgnoreCase));
 

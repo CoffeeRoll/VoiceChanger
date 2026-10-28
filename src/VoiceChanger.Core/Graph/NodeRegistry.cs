@@ -90,6 +90,10 @@ public sealed class NodeRegistry
         return descriptor;
     }
 
+    /// <summary>Takes a node type out (a plug-in that was blocked). Returns whether it was there.</summary>
+    public bool Unregister(string typeId) =>
+        _descriptors.RemoveAll(d => string.Equals(d.TypeId, typeId, StringComparison.OrdinalIgnoreCase)) > 0;
+
     public NodeDescriptor? Find(string typeId) =>
         _descriptors.FirstOrDefault(d => string.Equals(d.TypeId, typeId, StringComparison.OrdinalIgnoreCase));
 

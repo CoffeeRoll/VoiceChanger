@@ -4,6 +4,7 @@ using System.Windows.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using VoiceChanger.App.Services;
 using VoiceChanger.Core.Audio;
 using VoiceChanger.Core.Effects;
 using VoiceChanger.Core.Graph;
@@ -74,9 +75,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _initializing = true;
     private bool _disposed;
 
-    public MainWindowViewModel(IAudioBackend backend, SettingsStore settingsStore, EffectRegistry? registry = null)
+    public MainWindowViewModel(IAudioBackend backend, SettingsStore settingsStore, EffectRegistry? registry = null, PluginService? plugins = null)
     {
         _settingsStore = settingsStore;
+        Plugins = plugins;
+        registry ??= plugins?.Registry;
         _registry = registry ?? EffectRegistry.Default;
         _nodeRegistry = registry is null ? NodeRegistry.Default : NodeRegistry.CreateDefault(registry);
         _engine = new AudioEngine(backend);
@@ -125,6 +128,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             : "Audio devices are only supported on Windows at the moment.";
 
         _statusTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Background, (_, _) => UpdateStatus());
+        if (plugins is not null)
+        {
+            plugins.Changed += (_, _) => RefreshPlugins();
+        }
+
         _initializing = false;
     }
 
@@ -296,18 +304,31 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         UpdatePositions();
     }
 
-    /// <summary>Puts plug-ins found after the window opened into the "Add" menus.</summary>
-    public void AddPlugins(IEnumerable<EffectDescriptor> plugins)
+    /// <summary>The VST3 plug-ins, when the app hosts them.</summary>
+    public PluginService? Plugins { get; }
+
+    public bool HasPlugins => Plugins is not null;
+
+    /// <summary>The plug-in manager's state (made when it is first opened).</summary>
+    public PluginManagerViewModel? PluginManager => Plugins is null ? null : _pluginManager ??= new PluginManagerViewModel(Plugins);
+
+    private PluginManagerViewModel? _pluginManager;
+
+    /// <summary>
+    /// Brings the "Add" menus in line with the effect registry after plug-ins were found, blocked or
+    /// let back in.
+    /// </summary>
+    public void RefreshPlugins()
     {
-        var added = plugins.ToList();
-        if (added.Count == 0)
+        // Plug-in effects are the grouped ones.
+        foreach (var effect in _registry.Descriptors.Where(d => d.Group is not null && _nodeRegistry.Find(EffectNode.TypePrefix + d.TypeId) is null))
         {
-            return;
+            _nodeRegistry.RegisterEffect(effect);
         }
 
-        foreach (var plugin in added.Where(p => _nodeRegistry.Find(EffectNode.TypePrefix + p.TypeId) is null))
+        foreach (var node in _nodeRegistry.Descriptors.Where(d => d.Group is not null && _registry.Find(d.TypeId[EffectNode.TypePrefix.Length..]) is null).ToList())
         {
-            _nodeRegistry.RegisterEffect(plugin);
+            _nodeRegistry.Unregister(node.TypeId);
         }
 
         BuildAddEffectOptions();

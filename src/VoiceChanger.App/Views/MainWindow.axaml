@@ -72,6 +72,11 @@
         </Border>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+          <Button x:Name="PluginManagerButton"
+                  Content="Plug-ins"
+                  IsVisible="{Binding HasPlugins}"
+                  Click="OnPluginManagerClick"
+                  ToolTip.Tip="Where VST3 plug-ins come from, how they run, and which ones didn't load" />
           <!-- Step 4: master switch for every effect. -->
           <Border Classes="step" IsVisible="{Binding IsChainMode}" ToolTip.Tip="Step 4: turn the effects on or off">
             <TextBlock Text="4" />

@@ -66,7 +66,7 @@ public sealed class PluginUiTests : IDisposable
     }
 
     [AvaloniaFact]
-    public void Plugins_found_later_join_the_menus()
+    public void Plugins_found_later_join_the_menus_and_blocked_ones_leave()
     {
         var registry = EffectRegistry.CreateDefault();
         var vm = new MainWindowViewModel(new FakeAudioBackend(), Store(), registry);
@@ -74,11 +74,18 @@ public sealed class PluginUiTests : IDisposable
 
         var plugin = Plugin("Late Delay", "Late Audio");
         registry.Register(plugin);
-        vm.AddPlugins([plugin]);
+        vm.RefreshPlugins();
 
         Assert.Contains(vm.AddEffectOptions, o => o.Name == "Late Delay");
         Assert.Contains(vm.AddEffectMenu, e => e.Name == AddMenuEntry.PluginsName);
         Assert.Contains(vm.NodeEditor.AddNodeOptions, o => o.Name == "Late Delay");
+
+        registry.Unregister(plugin.TypeId);
+        vm.RefreshPlugins();
+
+        Assert.DoesNotContain(vm.AddEffectOptions, o => o.Name == "Late Delay");
+        Assert.DoesNotContain(vm.AddEffectMenu, e => e.Name == AddMenuEntry.PluginsName);
+        Assert.DoesNotContain(vm.NodeEditor.AddNodeOptions, o => o.Name == "Late Delay");
     }
 
     [AvaloniaFact]

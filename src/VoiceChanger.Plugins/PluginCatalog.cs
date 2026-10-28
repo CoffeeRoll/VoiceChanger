@@ -21,19 +21,31 @@ public sealed record PluginModule
     public string? Error { get; init; }
 }
 
-/// <summary>What <see cref="PluginCatalog"/> keeps in its cache file.</summary>
+/// <summary>A plug-in kept out of the menus (it crashed, or the user said so).</summary>
+public sealed record BlockedPlugin(string ClassId, string Name, string Vendor, string Reason);
+
+/// <summary>What <see cref="PluginCatalog"/> keeps in its file: the scan results and the user's choices.</summary>
 public sealed class PluginCache
 {
     public int Version { get; set; } = PluginCatalog.CacheVersion;
 
     public List<PluginModule> Modules { get; set; } = [];
+
+    /// <summary>Folders the user added to the standard ones.</summary>
+    public List<string> Folders { get; set; } = [];
+
+    public List<BlockedPlugin> Blocked { get; set; } = [];
+
+    /// <summary>Whether each plug-in runs in a process of its own.</summary>
+    public bool SeparateProcesses { get; set; } = true;
 }
 
 /// <summary>
 /// The VST3 effects installed on this machine. Scanning looks through the plug-in folders, reads
 /// each new or changed module's <c>moduleinfo.json</c> or, when it has none, loads it (in a separate
 /// process, through the scan function given), and remembers the results in a cache file so the next
-/// start doesn't scan again.
+/// start doesn't scan again. The file also keeps the folders the user added, the plug-ins kept out
+/// of the menus, and whether plug-ins run in processes of their own.
 /// </summary>
 public sealed class PluginCatalog(string cachePath)
 {
@@ -41,6 +53,8 @@ public sealed class PluginCatalog(string cachePath)
 
     private readonly object _gate = new();
     private IReadOnlyList<PluginModule> _modules = [];
+    private List<string> _folders = [];
+    private List<BlockedPlugin> _blocked = [];
 
     /// <summary>Where the app keeps the cache: next to its settings.</summary>
     public static string DefaultCachePath { get; } = Path.Combine(
@@ -55,13 +69,49 @@ public sealed class PluginCatalog(string cachePath)
 
     public IReadOnlyList<PluginModule> Modules => Volatile.Read(ref _modules);
 
-    /// <summary>Every effect of the modules that scanned fine, by name.</summary>
+    /// <summary>Every effect of the modules that scanned fine and isn't blocked, by name.</summary>
     public IReadOnlyList<PluginInfo> Plugins =>
+        AllPlugins.Where(p => !IsBlocked(p.ClassId)).ToList();
+
+    /// <summary>Every effect of the modules that scanned fine, blocked or not, by name.</summary>
+    public IReadOnlyList<PluginInfo> AllPlugins =>
         Modules.Where(m => m.Error is null)
             .SelectMany(m => m.Classes)
             .DistinctBy(p => p.ClassId, StringComparer.OrdinalIgnoreCase)
             .OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
+
+    /// <summary>Modules that couldn't be scanned, with the reason.</summary>
+    public IReadOnlyList<PluginModule> FailedModules => Modules.Where(m => m.Error is not null).ToList();
+
+    /// <summary>Folders the user added to <see cref="DefaultFolders"/>.</summary>
+    public IReadOnlyList<string> ExtraFolders
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _folders];
+            }
+        }
+    }
+
+    /// <summary>The standard folders and the user's.</summary>
+    public IReadOnlyList<string> AllFolders => DefaultFolders.Concat(ExtraFolders).Distinct(PathComparer).ToList();
+
+    public IReadOnlyList<BlockedPlugin> Blocked
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _blocked];
+            }
+        }
+    }
+
+    /// <summary>Whether each plug-in runs in a process of its own (the safer way).</summary>
+    public bool SeparateProcesses { get; set; } = true;
 
     /// <summary>
     /// Scans in a separate process: the running app started again with
@@ -70,15 +120,74 @@ public sealed class PluginCatalog(string cachePath)
     /// </summary>
     public static IReadOnlyList<PluginInfo> ScanWithThisApp(string modulePath)
     {
-        string executable = Environment.ProcessPath ?? throw new PluginException("The app's path is unknown.");
-        string[] arguments = [];
-        if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
-        {
-            // Started as "dotnet VoiceChanger.dll": that path comes first on the command line.
-            arguments = [Environment.GetCommandLineArgs()[0]];
-        }
+        var command = PluginHostCommand.ThisApp() ?? throw new PluginException("The app's path is unknown.");
+        return PluginScanner.ScanInSeparateProcess(modulePath, command.Executable, command.Arguments);
+    }
 
-        return PluginScanner.ScanInSeparateProcess(modulePath, executable, arguments);
+    /// <summary>Adds a folder to look for plug-ins in. Returns false when it is already one of them.</summary>
+    public bool AddFolder(string folder)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        string full = Path.GetFullPath(folder);
+        lock (_gate)
+        {
+            if (AllFolders.Contains(full, PathComparer))
+            {
+                return false;
+            }
+
+            _folders.Add(full);
+            return true;
+        }
+    }
+
+    public bool RemoveFolder(string folder)
+    {
+        lock (_gate)
+        {
+            return _folders.RemoveAll(f => PathComparer.Equals(f, folder)) > 0;
+        }
+    }
+
+    public bool IsBlocked(string classId)
+    {
+        lock (_gate)
+        {
+            return _blocked.Any(b => string.Equals(b.ClassId, classId, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    /// <summary>Keeps a plug-in out of the menus (a saved one loads as a stand-in) until unblocked.</summary>
+    public void Block(PluginInfo plugin, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(plugin);
+        lock (_gate)
+        {
+            if (!IsBlocked(plugin.ClassId))
+            {
+                _blocked.Add(new BlockedPlugin(plugin.ClassId, plugin.Name, plugin.Vendor, reason));
+            }
+        }
+    }
+
+    public bool Unblock(string classId)
+    {
+        lock (_gate)
+        {
+            return _blocked.RemoveAll(b => string.Equals(b.ClassId, classId, StringComparison.OrdinalIgnoreCase)) > 0;
+        }
+    }
+
+    /// <summary>Forgets what a scan found out about a module, so the next scan looks at it again.</summary>
+    public bool Forget(string modulePath)
+    {
+        lock (_gate)
+        {
+            var modules = Modules.Where(m => !PathComparer.Equals(m.Path, modulePath)).ToList();
+            bool forgotten = modules.Count != Modules.Count;
+            Volatile.Write(ref _modules, modules);
+            return forgotten;
+        }
     }
 
     /// <summary>Reads the cache file. A missing or damaged file leaves the catalogue empty.</summary>
@@ -98,8 +207,18 @@ public sealed class PluginCatalog(string cachePath)
             Trace.WriteLine($"The plug-in list could not be read: {ex.Message}");
         }
 
-        var modules = cache?.Version == CacheVersion ? cache.Modules : [];
-        Volatile.Write(ref _modules, modules.Where(m => !string.IsNullOrEmpty(m.Path)).ToList());
+        if (cache?.Version != CacheVersion)
+        {
+            cache = new PluginCache();
+        }
+
+        lock (_gate)
+        {
+            Volatile.Write(ref _modules, (cache.Modules ?? []).Where(m => !string.IsNullOrEmpty(m.Path)).ToList());
+            _folders = (cache.Folders ?? []).Where(f => !string.IsNullOrWhiteSpace(f)).ToList();
+            _blocked = (cache.Blocked ?? []).Where(b => !string.IsNullOrEmpty(b.ClassId)).ToList();
+            SeparateProcesses = cache.SeparateProcesses;
+        }
     }
 
     public void Save()
@@ -113,7 +232,14 @@ public sealed class PluginCatalog(string cachePath)
         string temporary = CachePath + ".tmp";
         using (var stream = File.Create(temporary))
         {
-            JsonSerializer.Serialize(stream, new PluginCache { Modules = [.. Modules] }, PluginJsonContext.Default.PluginCache);
+            var cache = new PluginCache
+            {
+                Modules = [.. Modules],
+                Folders = [.. ExtraFolders],
+                Blocked = [.. Blocked],
+                SeparateProcesses = SeparateProcesses,
+            };
+            JsonSerializer.Serialize(stream, cache, PluginJsonContext.Default.PluginCache);
         }
 
         File.Move(temporary, CachePath, overwrite: true);
@@ -162,7 +288,14 @@ public sealed class PluginCatalog(string cachePath)
     /// Adds the effects not registered yet to <paramref name="registry"/> (so they also become
     /// nodes). Returns the ones added.
     /// </summary>
-    public IReadOnlyList<EffectDescriptor> RegisterInto(EffectRegistry registry, PluginHosting? hosting = null, Action<PluginEffect>? created = null)
+    public IReadOnlyList<EffectDescriptor> RegisterInto(EffectRegistry registry, PluginHosting? hosting = null, Action<PluginEffect>? created = null) =>
+        RegisterInto(registry, () => hosting ?? PluginHosting.InProcess, created);
+
+    /// <summary>
+    /// Adds the effects not registered yet to <paramref name="registry"/>, each running as
+    /// <paramref name="hosting"/> says at the time it is made. Returns the ones added.
+    /// </summary>
+    public IReadOnlyList<EffectDescriptor> RegisterInto(EffectRegistry registry, Func<PluginHosting> hosting, Action<PluginEffect>? created = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         var added = new List<EffectDescriptor>();
@@ -185,13 +318,18 @@ public sealed class PluginCatalog(string cachePath)
     /// How a plug-in appears in the effect and node lists: it runs as <paramref name="hosting"/> says,
     /// and <paramref name="created"/> hears of each effect made.
     /// </summary>
-    public static EffectDescriptor Describe(PluginInfo plugin, PluginHosting? hosting = null, Action<PluginEffect>? created = null)
+    public static EffectDescriptor Describe(PluginInfo plugin, PluginHosting? hosting = null, Action<PluginEffect>? created = null) =>
+        Describe(plugin, () => hosting ?? PluginHosting.InProcess, created);
+
+    /// <summary>How a plug-in appears in the effect and node lists, running as <paramref name="hosting"/> says when it is made.</summary>
+    public static EffectDescriptor Describe(PluginInfo plugin, Func<PluginHosting> hosting, Action<PluginEffect>? created = null)
     {
         ArgumentNullException.ThrowIfNull(plugin);
+        ArgumentNullException.ThrowIfNull(hosting);
         string vendor = string.IsNullOrWhiteSpace(plugin.Vendor) ? "an unknown vendor" : plugin.Vendor;
         AudioEffect Create()
         {
-            var effect = PluginEffect.Create(plugin, hosting);
+            var effect = PluginEffect.Create(plugin, hosting());
             if (effect is PluginEffect loaded)
             {
                 created?.Invoke(loaded);
