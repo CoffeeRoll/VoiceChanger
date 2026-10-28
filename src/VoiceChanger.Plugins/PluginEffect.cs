@@ -457,7 +457,9 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable, IPluginEv
             return false;
         }
 
-        // Its settings: the last saved state, then the values set since.
+        // Its settings: the last saved state, then the values set since. Restarts they ask for
+        // (a latency, say) are acted on once it is in place.
+        Interlocked.Exchange(ref _restartFlags, 0);
         plugin.Events = this;
         if (_lastState is not null)
         {
@@ -482,7 +484,7 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable, IPluginEv
             }
         }
 
-        Interlocked.Exchange(ref _restartFlags, 0);
+        HandleRestart();
         StatusChanged?.Invoke(this, EventArgs.Empty);
         return true;
     }

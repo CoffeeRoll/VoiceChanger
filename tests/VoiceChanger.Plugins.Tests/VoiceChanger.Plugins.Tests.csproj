@@ -19,6 +19,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\VoiceChanger.Plugins\VoiceChanger.Plugins.csproj" />
+    <!-- The host the out-of-process tests run plug-ins in. -->
+    <ProjectReference Include="..\..\src\VoiceChanger.PluginHost\VoiceChanger.PluginHost.csproj" />
   </ItemGroup>
 
 </Project>

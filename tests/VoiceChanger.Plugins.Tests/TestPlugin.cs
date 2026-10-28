@@ -49,6 +49,15 @@ internal static class TestPlugin
 
     public static PluginEffect Open(PluginHosting? hosting = null) => PluginEffect.Open(Require(), hosting);
 
+    /// <summary>Plug-ins in host processes of their own: VoiceChanger.PluginHost, built next to the tests.</summary>
+    public static PluginHosting SeparateProcesses { get; } = new()
+    {
+        SeparateProcesses = true,
+        HostCommand = new PluginHostCommand(
+            Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "VoiceChanger.PluginHost.exe" : "VoiceChanger.PluginHost"),
+            []),
+    };
+
     /// <summary>A gain in dB as the plug-in's normalised value.</summary>
     public static double GainValue(double decibels) => (decibels + 24) / 36;
 

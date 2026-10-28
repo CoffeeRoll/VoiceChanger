@@ -1,31 +1,25 @@
 using VoiceChanger.Core.Effects;
 using VoiceChanger.Core.Graph;
 using VoiceChanger.Core.Settings;
+using static VoiceChanger.Plugins.Tests.TestAudio;
 
 namespace VoiceChanger.Plugins.Tests;
 
-public sealed class PluginEffectTests
+/// <summary>The test plug-in as an effect; run in this process and in a host process of its own.</summary>
+public abstract class PluginEffectTests
 {
-    private const int Rate = 48000;
+    protected const int Rate = 48000;
 
-    [Fact]
-    public void Scanning_finds_the_effect_with_and_without_moduleinfo()
-    {
-        var info = TestPlugin.Info;
-        var loaded = Assert.Single(PluginScanner.ScanModule(info.Path), p => p.Name == TestPlugin.ClassName);
+    /// <summary>How the plug-in runs in these tests.</summary>
+    protected abstract PluginHosting Hosting { get; }
 
-        Assert.Equal(info.ClassId, loaded.ClassId);
-        Assert.Equal("VoiceChanger", loaded.Vendor);
-        Assert.Equal("Fx|Tools", loaded.Subcategories);
-        Assert.Equal("Fx|Tools", info.Subcategories);
-        Assert.Equal(32, info.ClassId.Length);
-        Assert.Equal(PluginEffect.TypePrefix + info.ClassId, info.TypeId);
-    }
+    protected PluginEffect Open() => TestPlugin.Open(Hosting);
+
 
     [Fact]
     public void Parameters_map_to_effect_parameters_with_the_plugins_text()
     {
-        using var effect = TestPlugin.Open();
+        using var effect = Open();
 
         Assert.Equal(TestPlugin.ClassName, effect.Name);
         Assert.Equal(TestPlugin.Info.TypeId, effect.TypeId);
@@ -58,7 +52,7 @@ public sealed class PluginEffectTests
     [Fact]
     public void Processes_stereo_and_follows_parameter_changes()
     {
-        using var effect = TestPlugin.Open();
+        using var effect = Open();
         effect.Prepare(Rate, 2);
         var input = Sine(1024, 2);
 
@@ -74,7 +68,7 @@ public sealed class PluginEffectTests
     [Fact]
     public void Processes_mono()
     {
-        using var effect = TestPlugin.Open();
+        using var effect = Open();
         effect.Prepare(Rate, 1);
         effect.GetParameter("0").Value = (float)TestPlugin.GainValue(-6);
         var input = Sine(3000, 1);
@@ -89,7 +83,7 @@ public sealed class PluginEffectTests
     [Fact]
     public void The_sidechain_is_the_connected_signal_or_else_the_input()
     {
-        using var effect = TestPlugin.Open();
+        using var effect = Open();
         var sidechain = Assert.IsAssignableFrom<ISidechainEffect>(effect);
         effect.Prepare(Rate, 2);
         effect.GetParameter("2").Value = 1;
@@ -114,7 +108,7 @@ public sealed class PluginEffectTests
     [Fact]
     public void A_latency_change_restarts_the_plugin_and_is_reported()
     {
-        using var effect = TestPlugin.Open();
+        using var effect = Open();
         effect.Prepare(Rate, 1);
         Assert.Equal(0, effect.LatencyFrames);
 
@@ -133,7 +127,7 @@ public sealed class PluginEffectTests
     [Fact]
     public void Reset_clears_the_plugins_signal_history()
     {
-        using var effect = TestPlugin.Open();
+        using var effect = Open();
         effect.Prepare(Rate, 1);
         effect.GetParameter("1").Value = 2;
         Run(effect, Sine(256, 1));
@@ -146,7 +140,7 @@ public sealed class PluginEffectTests
     [Fact]
     public void Stepped_parameters_reach_the_processor()
     {
-        using var effect = TestPlugin.Open();
+        using var effect = Open();
         effect.Prepare(Rate, 1);
         effect.GetParameter("4").Value = 3; // hold every sample for 4
         var ramp = Enumerable.Range(0, 16).Select(i => (float)i).ToArray();
@@ -160,7 +154,7 @@ public sealed class PluginEffectTests
     public void State_round_trips_through_a_new_instance()
     {
         byte[] state;
-        using (var effect = TestPlugin.Open())
+        using (var effect = Open())
         {
             effect.GetParameter("0").Value = (float)TestPlugin.GainValue(-12);
             effect.GetParameter("1").Value = 2;
@@ -168,7 +162,7 @@ public sealed class PluginEffectTests
             state = Assert.IsType<byte[]>(effect.SaveState());
         }
 
-        using var restored = TestPlugin.Open();
+        using var restored = Open();
         Assert.True(restored.LoadState(state));
         Assert.Equal(TestPlugin.GainValue(-12), restored.GetParameter("0").Value, 5);
         Assert.Equal(2, restored.GetParameter("1").Value);
@@ -183,7 +177,7 @@ public sealed class PluginEffectTests
     public void Settings_save_the_state_and_restore_it()
     {
         var registry = new EffectRegistry();
-        registry.Register(PluginCatalog.Describe(TestPlugin.Info));
+        registry.Register(PluginCatalog.Describe(TestPlugin.Info, Hosting));
         var effect = Assert.IsAssignableFrom<PluginEffect>(registry.Create(TestPlugin.Info.TypeId));
         effect.GetParameter("0").Value = (float)TestPlugin.GainValue(3);
         effect.GetParameter("2").Value = 1;
@@ -200,6 +194,76 @@ public sealed class PluginEffectTests
         Assert.Equal(1, restored.GetParameter("2").Value);
         Assert.False(restored.IsEnabled);
         effect.Dispose();
+    }
+
+    [Fact]
+    public void In_a_graph_the_latency_counts_and_the_second_socket_feeds_the_sidechain()
+    {
+        var graph = new AudioGraph();
+        var voice = graph.Add(new InputDeviceNode());
+        var key = graph.Add(new InputDeviceNode());
+        using var effect = Open();
+        var plugin = graph.Add(new EffectNode(effect));
+        var output = graph.Add(new OutputDeviceNode());
+        graph.Connect(voice.Outputs[0], plugin.Inputs[0]);
+        graph.Connect(key.Outputs[0], plugin.Inputs[1]);
+        graph.Connect(plugin.Outputs[0], output.Inputs[0]);
+        Assert.Equal(["Voice", "Key"], plugin.Inputs.Select(p => p.Name));
+
+        foreach (var node in graph.Nodes)
+        {
+            node.Prepare(Rate, 1);
+        }
+
+        effect.GetParameter("1").Value = 1;
+        effect.GetParameter("2").Value = 1;
+        var voiceBuffer = new float[GraphPlan.BlockFrames];
+        var keyBuffer = new float[GraphPlan.BlockFrames];
+        var mix = new float[GraphPlan.BlockFrames];
+        var plan = GraphPlan.Compile(graph, 1, n => n == voice ? voiceBuffer : n == key ? keyBuffer : n == output ? mix : null);
+        Assert.Equal(64, plan.LatencyFrames());
+
+        Array.Fill(voiceBuffer, 0.1f);
+        Array.Fill(keyBuffer, 0.2f);
+        for (int block = 0; block < 4; block++)
+        {
+            Array.Clear(mix);
+            plan.Process(480);
+        }
+
+        Assert.All(mix.Take(480), sample => Assert.Equal(0.3f, sample, 5));
+    }
+}
+
+/// <summary>The plug-in in the app's own process.</summary>
+public sealed class InProcessPluginEffectTests : PluginEffectTests
+{
+    protected override PluginHosting Hosting => PluginHosting.InProcess;
+}
+
+/// <summary>The plug-in in a host process of its own.</summary>
+public sealed class SeparateProcessPluginEffectTests : PluginEffectTests
+{
+    protected override PluginHosting Hosting => TestPlugin.SeparateProcesses;
+}
+
+/// <summary>What doesn't depend on where the plug-in runs, and the in-process crash guard.</summary>
+public sealed class PluginTests
+{
+    private const int Rate = 48000;
+
+    [Fact]
+    public void Scanning_finds_the_effect_with_and_without_moduleinfo()
+    {
+        var info = TestPlugin.Info;
+        var loaded = Assert.Single(PluginScanner.ScanModule(info.Path), p => p.Name == TestPlugin.ClassName);
+
+        Assert.Equal(info.ClassId, loaded.ClassId);
+        Assert.Equal("VoiceChanger", loaded.Vendor);
+        Assert.Equal("Fx|Tools", loaded.Subcategories);
+        Assert.Equal("Fx|Tools", info.Subcategories);
+        Assert.Equal(32, info.ClassId.Length);
+        Assert.Equal(PluginEffect.TypePrefix + info.ClassId, info.TypeId);
     }
 
     [Fact]
@@ -268,44 +332,6 @@ public sealed class PluginEffectTests
     }
 
     [Fact]
-    public void In_a_graph_the_latency_counts_and_the_second_socket_feeds_the_sidechain()
-    {
-        var graph = new AudioGraph();
-        var voice = graph.Add(new InputDeviceNode());
-        var key = graph.Add(new InputDeviceNode());
-        using var effect = TestPlugin.Open();
-        var plugin = graph.Add(new EffectNode(effect));
-        var output = graph.Add(new OutputDeviceNode());
-        graph.Connect(voice.Outputs[0], plugin.Inputs[0]);
-        graph.Connect(key.Outputs[0], plugin.Inputs[1]);
-        graph.Connect(plugin.Outputs[0], output.Inputs[0]);
-        Assert.Equal(["Voice", "Key"], plugin.Inputs.Select(p => p.Name));
-
-        foreach (var node in graph.Nodes)
-        {
-            node.Prepare(Rate, 1);
-        }
-
-        effect.GetParameter("1").Value = 1;
-        effect.GetParameter("2").Value = 1;
-        var voiceBuffer = new float[GraphPlan.BlockFrames];
-        var keyBuffer = new float[GraphPlan.BlockFrames];
-        var mix = new float[GraphPlan.BlockFrames];
-        var plan = GraphPlan.Compile(graph, 1, n => n == voice ? voiceBuffer : n == key ? keyBuffer : n == output ? mix : null);
-        Assert.Equal(64, plan.LatencyFrames());
-
-        Array.Fill(voiceBuffer, 0.1f);
-        Array.Fill(keyBuffer, 0.2f);
-        for (int block = 0; block < 4; block++)
-        {
-            Array.Clear(mix);
-            plan.Process(480);
-        }
-
-        Assert.All(mix.Take(480), sample => Assert.Equal(0.3f, sample, 5));
-    }
-
-    [Fact]
     public void A_crashing_plugin_passes_audio_through()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "Crashes are only caught on Windows.");
@@ -321,35 +347,5 @@ public sealed class PluginEffectTests
         Assert.NotNull(effect.Problem);
         AssertClose(input, output, 0);
         AssertClose(input, Run(effect, input), 0);
-    }
-
-    private static float[] Sine(int frames, int channels)
-    {
-        var samples = new float[frames * channels];
-        for (int frame = 0; frame < frames; frame++)
-        {
-            for (int channel = 0; channel < channels; channel++)
-            {
-                samples[(frame * channels) + channel] = 0.5f * MathF.Sin((frame * 0.05f) + channel);
-            }
-        }
-
-        return samples;
-    }
-
-    private static float[] Run(AudioEffect effect, float[] input)
-    {
-        var buffer = (float[])input.Clone();
-        effect.Process(buffer);
-        return buffer;
-    }
-
-    private static void AssertClose(float[] expected, float[] actual, float tolerance)
-    {
-        Assert.Equal(expected.Length, actual.Length);
-        for (int i = 0; i < expected.Length; i++)
-        {
-            Assert.True(Math.Abs(expected[i] - actual[i]) <= tolerance, $"Sample {i}: expected {expected[i]}, got {actual[i]}.");
-        }
     }
 }
