@@ -795,6 +795,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void RemoveEffect(EffectViewModel viewModel)
     {
         _engine.Effects.Remove(viewModel.Effect);
+
+        // A plug-in lets go of its window and its host process (it waits for a block in progress).
+        (viewModel.Effect as IDisposable)?.Dispose();
         viewModel.PropertyChanged -= OnEffectPropertyChanged;
         Effects.Remove(viewModel);
         OnEffectsChanged();

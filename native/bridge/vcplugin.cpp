@@ -94,9 +94,12 @@ FUnknown* hostContext()
     return &application;
 }
 
-// Modules stay loaded while any of their plug-ins is open; opening another instance reuses them.
+// Modules stay loaded once loaded; opening another instance reuses them. Unloading one while
+// another thread loads it again (a plug-in closed by .NET's finalizer as the same plug-in is added
+// again) would race on the module's plug-in factory. The map is never destroyed, so no module is
+// unloaded during the process's exit either.
 std::mutex modulesLock;
-std::map<std::string, std::weak_ptr<VST3::Hosting::Module>> modules;
+auto& modules = *new std::map<std::string, VST3::Hosting::Module::Ptr>();
 
 // The module to load from a bundle. The SDK looks in the bundle's folder for this process's
 // architecture; an ARM64X binary (arm64x-win) loads into ARM64 and x64 processes alike, so a bundle
@@ -125,7 +128,7 @@ std::string modulePath(const std::string& path)
 VST3::Hosting::Module::Ptr loadModule(const std::string& path, std::string& error)
 {
     std::lock_guard<std::mutex> lock(modulesLock);
-    if (auto existing = modules[path].lock())
+    if (auto existing = modules[path])
         return existing;
     auto module = VST3::Hosting::Module::create(modulePath(path), error);
     if (module)

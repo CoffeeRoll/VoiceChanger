@@ -263,6 +263,13 @@ public sealed partial class NodeEditorViewModel : ObservableObject
                 }
 
                 Nodes[i].Detach();
+
+                // A removed plug-in lets go of its window and its host process.
+                if (Nodes[i].Node is EffectNode { Effect: IDisposable effect })
+                {
+                    effect.Dispose();
+                }
+
                 Nodes.RemoveAt(i);
             }
         }

@@ -157,6 +157,26 @@ public sealed class PluginUiTests : IDisposable
         Assert.Equal(1, effect.GetParameter("1").Value);
     }
 
+    [AvaloniaFact]
+    public void Removing_a_plugin_closes_it()
+    {
+        var info = TestPlugin.Require();
+        var registry = EffectRegistry.CreateDefault();
+        registry.Register(PluginCatalog.Describe(info));
+        var vm = new MainWindowViewModel(new FakeAudioBackend(), Store(), registry);
+
+        vm.AddEffectOptions.Single(o => o.Name == TestPlugin.ClassName).Command.Execute(null);
+        var card = vm.Effects[^1];
+        var effect = Assert.IsAssignableFrom<PluginEffect>(card.Effect);
+        card.RemoveCommand!.Execute(null);
+        Assert.False(effect.Instance.IsAlive);
+
+        var node = vm.NodeEditor.AddNode(vm.NodeEditor.AddNodeOptions.Single(o => o.Name == TestPlugin.ClassName).Descriptor);
+        var nodeEffect = Assert.IsAssignableFrom<PluginEffect>(((EffectNode)node.Node).Effect);
+        vm.NodeEditor.RemoveNode(node);
+        Assert.False(nodeEffect.Instance.IsAlive);
+    }
+
     [Fact]
     public void The_app_scans_a_plugin_in_a_run_of_its_own()
     {
