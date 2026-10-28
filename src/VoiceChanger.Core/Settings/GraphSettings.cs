@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using VoiceChanger.Core.Effects;
 using VoiceChanger.Core.Graph;
 
 namespace VoiceChanger.Core.Settings;
@@ -46,9 +48,15 @@ public sealed class GraphSettings
 
         using var update = graph.BeginUpdate();
         graph.Clear();
+
+        // A missing plug-in keeps its side-chain input when something was plugged into it.
+        var sidechained = (Connections ?? [])
+            .Where(c => c.ToPort == EffectNode.SidechainPort)
+            .Select(c => c.To)
+            .ToHashSet();
         foreach (var saved in Nodes ?? [])
         {
-            var node = saved.Restore(registry);
+            var node = saved.Restore(registry, sidechained.Contains(saved.Id));
             if (node is null)
             {
                 continue;
@@ -94,9 +102,18 @@ public sealed class NodeSettings
 
     public Dictionary<string, float> Parameters { get; set; } = [];
 
+    /// <summary>An effect node's plug-in name, so it can be named when it is missing.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    /// <summary>An effect node's plug-in state (base64), see <see cref="IStatefulEffect"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? State { get; set; }
+
     public static NodeSettings Capture(AudioNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
+        var effect = (node as EffectNode)?.Effect;
         return new NodeSettings
         {
             Id = node.Id,
@@ -105,16 +122,28 @@ public sealed class NodeSettings
             DeviceId = (node as DeviceNode)?.DeviceId,
             X = Math.Round(node.X, 1),
             Y = Math.Round(node.Y, 1),
-            Enabled = node is not EffectNode effect || effect.Effect.IsEnabled,
-            Parameters = node.Parameters.ToDictionary(p => p.Id, p => p.Value),
+            Enabled = effect?.IsEnabled ?? true,
+            Parameters = effect is not null ? SavedEffect.ParametersOf(effect) : node.Parameters.ToDictionary(p => p.Id, p => p.Value),
+            Name = effect is not null ? SavedEffect.NameOf(effect) : null,
+            State = effect is not null ? SavedEffect.StateOf(effect) : null,
         };
     }
 
-    /// <summary>Creates the node, or <c>null</c> if its type is unknown.</summary>
-    public AudioNode? Restore(NodeRegistry registry)
+    /// <summary>
+    /// Creates the node, or <c>null</c> if its type is unknown. A plug-in that isn't installed or
+    /// doesn't load gets an effect node with a <see cref="MissingEffect"/>, with a side-chain input
+    /// when <paramref name="hasSidechain"/>.
+    /// </summary>
+    public AudioNode? Restore(NodeRegistry registry, bool hasSidechain = false)
     {
         ArgumentNullException.ThrowIfNull(registry);
         var node = registry.Create(Type);
+        if (node is EffectNode { Effect: MissingEffect } || (node is null && Type.StartsWith(EffectNode.TypePrefix, StringComparison.OrdinalIgnoreCase)))
+        {
+            var missing = SavedEffect.StandIn(Type[EffectNode.TypePrefix.Length..], Name, Parameters, State, hasSidechain);
+            node = missing is null ? null : new EffectNode(missing);
+        }
+
         if (node is null)
         {
             return null;
@@ -133,9 +162,15 @@ public sealed class NodeSettings
             device.DeviceId = DeviceId;
         }
 
-        if (node is EffectNode effect)
+        if (node is EffectNode effectNode)
         {
-            effect.Effect.IsEnabled = Enabled;
+            if (effectNode.Effect is not MissingEffect)
+            {
+                SavedEffect.Apply(effectNode.Effect, Parameters, State);
+            }
+
+            effectNode.Effect.IsEnabled = Enabled;
+            return node;
         }
 
         // In the node's own order, so settings that add ports (the mixer's input count) come first.

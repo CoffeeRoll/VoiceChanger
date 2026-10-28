@@ -115,6 +115,9 @@ VC_API int vc_setup(vc_plugin* plugin, double sample_rate, int max_frames, int c
 /* Stops processing (the opposite of vc_setup). */
 VC_API void vc_suspend(vc_plugin* plugin);
 
+/* Asks the plug-in to clear its signal history (setProcessing off and on). Audio thread. */
+VC_API int vc_reset(vc_plugin* plugin);
+
 VC_API int vc_info(vc_plugin* plugin, vc_plugin_info* info);
 
 /* Processes one block (audio thread): per-channel buffers of the host's channel count. sidechain

@@ -511,6 +511,26 @@ VC_API void vc_suspend(vc_plugin* plugin)
     }
 }
 
+VC_API int vc_reset(vc_plugin* plugin)
+{
+    if (!plugin)
+        return VC_ERROR_ARGUMENT;
+    if (!plugin->active)
+        return VC_ERROR_NOT_ACTIVE;
+    if (plugin->crashed)
+        return VC_ERROR_CRASHED;
+    try
+    {
+        plugin->processor->setProcessing(false);
+        plugin->processor->setProcessing(true);
+        return VC_OK;
+    }
+    catch (...)
+    {
+        return VC_ERROR_FAILED;
+    }
+}
+
 VC_API int vc_info(vc_plugin* plugin, vc_plugin_info* info)
 {
     if (!plugin || !info)

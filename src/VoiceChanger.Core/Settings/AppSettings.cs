@@ -44,6 +44,14 @@ public sealed class EffectSettings
 
     public Dictionary<string, float> Parameters { get; set; } = [];
 
+    /// <summary>A plug-in's name, so it can be named when it is missing.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    /// <summary>A plug-in's own state (base64), see <see cref="IStatefulEffect"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? State { get; set; }
+
     public static EffectSettings Capture(AudioEffect effect)
     {
         ArgumentNullException.ThrowIfNull(effect);
@@ -51,27 +59,91 @@ public sealed class EffectSettings
         {
             Type = effect.TypeId,
             Enabled = effect.IsEnabled,
-            Parameters = effect.Parameters.ToDictionary(p => p.Id, p => p.Value),
+            Parameters = SavedEffect.ParametersOf(effect),
+            Name = SavedEffect.NameOf(effect),
+            State = SavedEffect.StateOf(effect),
         };
     }
 
-    /// <summary>Creates the effect described by these settings, or <c>null</c> if the type is unknown.</summary>
+    /// <summary>
+    /// Creates the effect described by these settings: a <see cref="MissingEffect"/> for a plug-in
+    /// that isn't installed or doesn't load, or <c>null</c> if the type is unknown.
+    /// </summary>
     public AudioEffect? Restore(EffectRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);
         var effect = registry.Create(Type);
-        if (effect is null)
+        if (effect is null or MissingEffect)
+        {
+            effect = SavedEffect.StandIn(Type, Name, Parameters, State, hasSidechain: false);
+        }
+        else
+        {
+            SavedEffect.Apply(effect, Parameters, State);
+        }
+
+        effect?.IsEnabled = Enabled;
+        return effect;
+    }
+}
+
+/// <summary>What <see cref="EffectSettings"/> and <see cref="NodeSettings"/> share about saving effects.</summary>
+internal static class SavedEffect
+{
+    public static Dictionary<string, float> ParametersOf(AudioEffect effect) =>
+        effect is MissingEffect missing
+            ? new Dictionary<string, float>(missing.SavedParameters)
+            : effect.Parameters.ToDictionary(p => p.Id, p => p.Value);
+
+    public static string? NameOf(AudioEffect effect) =>
+        effect is MissingEffect missing ? missing.SavedName
+        : MissingEffect.CanStandIn(effect.TypeId) ? effect.Name
+        : null;
+
+    public static string? StateOf(AudioEffect effect) =>
+        effect is IStatefulEffect stateful && stateful.SaveState() is { } state ? Convert.ToBase64String(state) : null;
+
+    /// <summary>A stand-in that keeps what was saved, for a plug-in; <c>null</c> for anything else.</summary>
+    public static MissingEffect? StandIn(string type, string? name, Dictionary<string, float>? parameters, string? state, bool hasSidechain) =>
+        MissingEffect.CanStandIn(type) ? MissingEffect.Create(type, name, parameters, Decode(state), hasSidechain) : null;
+
+    /// <summary>
+    /// Sets up a freshly created effect from what was saved: its state when it has one and accepts
+    /// it, otherwise the parameter values.
+    /// </summary>
+    public static void Apply(AudioEffect effect, Dictionary<string, float>? parameters, string? state)
+    {
+        if (Decode(state) is { } bytes && effect is IStatefulEffect stateful && stateful.LoadState(bytes))
+        {
+            return;
+        }
+
+        // In the effect's own order, so settings that add ports (the mixer's input count) come first.
+        var values = new Dictionary<string, float>(parameters ?? [], StringComparer.OrdinalIgnoreCase);
+        foreach (var parameter in effect.Parameters)
+        {
+            if (values.TryGetValue(parameter.Id, out float value))
+            {
+                parameter.Value = value;
+            }
+        }
+    }
+
+    private static byte[]? Decode(string? state)
+    {
+        if (string.IsNullOrEmpty(state))
         {
             return null;
         }
 
-        foreach (var (id, value) in Parameters ?? [])
+        try
         {
-            effect.FindParameter(id)?.Value = value;
+            return Convert.FromBase64String(state);
         }
-
-        effect.IsEnabled = Enabled;
-        return effect;
+        catch (FormatException)
+        {
+            return null;
+        }
     }
 }
 

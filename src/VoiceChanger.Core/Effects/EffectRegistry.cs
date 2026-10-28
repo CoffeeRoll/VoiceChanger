@@ -3,6 +3,9 @@ namespace VoiceChanger.Core.Effects;
 /// <summary>Describes an effect type that can be added to a chain.</summary>
 public sealed record EffectDescriptor(string TypeId, string Name, string Description, Func<AudioEffect> Create)
 {
+    /// <summary>Where menus list it: <c>null</c> for the built-in effects, the vendor for a plug-in.</summary>
+    public string? Group { get; init; }
+
     public override string ToString() => Name;
 }
 

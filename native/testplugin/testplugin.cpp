@@ -109,6 +109,21 @@ public:
         return AudioEffect::setActive(state);
     }
 
+    // Starting to process (again) clears the signal history.
+    tresult PLUGIN_API setProcessing(TBool state) override
+    {
+        if (state)
+        {
+            for (auto& line : delay)
+                std::fill(line.begin(), line.end(), 0.0f);
+            std::fill(held.begin(), held.end(), 0.0f);
+            delayPosition = 0;
+            holdCounter = 0;
+        }
+
+        return AudioEffect::setProcessing(state);
+    }
+
     uint32 PLUGIN_API getLatencySamples() override { return static_cast<uint32>(latency); }
 
     uint32 PLUGIN_API getTailSamples() override { return static_cast<uint32>(latency); }

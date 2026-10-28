@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>VoiceChanger.Plugins</RootNamespace>
+    <Description>Hosts third-party VST3 effects through the native vcplugin bridge.</Description>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="VoiceChanger.Plugins.Tests" />
+    <InternalsVisibleTo Include="VoiceChanger.App.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VoiceChanger.Core\VoiceChanger.Core.csproj" />
+  </ItemGroup>
+
+  <!-- The native bridge, once it is built (cmake -S native -B native/build). Without it plug-ins don't load. -->
+  <PropertyGroup>
+    <VcPluginDir>$(MSBuildThisFileDirectory)..\..\native\build\out\</VcPluginDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(VcPluginDir)vcplugin.dll" Condition="Exists('$(VcPluginDir)vcplugin.dll')" Link="vcplugin.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(VcPluginDir)libvcplugin.so" Condition="Exists('$(VcPluginDir)libvcplugin.so')" Link="libvcplugin.so" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(VcPluginDir)libvcplugin.dylib" Condition="Exists('$(VcPluginDir)libvcplugin.dylib')" Link="libvcplugin.dylib" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+</Project>
