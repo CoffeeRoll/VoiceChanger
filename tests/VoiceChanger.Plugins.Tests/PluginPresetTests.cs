@@ -40,6 +40,23 @@ public sealed class PluginPresetTests : IDisposable
     }
 
     [Fact]
+    public void Edits_and_programs_reach_the_processor_in_the_order_they_were_made()
+    {
+        using var effect = TestPlugin.Open(new PluginHosting { PresetFolders = [] });
+        effect.Prepare(48000, 1);
+
+        // A program, then an edit, before the next block: the edit wins.
+        effect.ApplyPreset(effect.Presets[1]);
+        effect.GetParameter("0").Value = (float)TestPlugin.GainValue(-6);
+        Assert.Equal(0.1f * MathF.Pow(10, -6 / 20f), ProcessOne(effect), 4);
+
+        // An edit, then a program: the program wins.
+        effect.GetParameter("0").Value = (float)TestPlugin.GainValue(-12);
+        effect.ApplyPreset(effect.Presets[1]);
+        Assert.Equal(0.1f * MathF.Pow(10, 6 / 20f), ProcessOne(effect), 4);
+    }
+
+    [Fact]
     public void Preset_files_are_saved_and_listed_with_their_folders()
     {
         var info = TestPlugin.Require();
@@ -71,5 +88,12 @@ public sealed class PluginPresetTests : IDisposable
         Assert.Equal(2, reopened.GetParameter("4").Value);
         Assert.Same(warm, reopened.FindMatchingPreset());
         Assert.Equal(info.TypeId, reopened.TypeId);
+    }
+
+    private static float ProcessOne(AudioEffect effect)
+    {
+        var block = Enumerable.Repeat(0.1f, 16).ToArray();
+        effect.Process(block);
+        return block[^1];
     }
 }

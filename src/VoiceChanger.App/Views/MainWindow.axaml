@@ -30,6 +30,9 @@
     <DataTemplate DataType="vm:GenericEffectViewModel">
       <views:GenericEffectEditor />
     </DataTemplate>
+    <DataTemplate DataType="vm:PluginEffectViewModel">
+      <views:PluginEffectEditor />
+    </DataTemplate>
   </Window.DataTemplates>
 
   <Grid RowDefinitions="Auto,*,Auto">

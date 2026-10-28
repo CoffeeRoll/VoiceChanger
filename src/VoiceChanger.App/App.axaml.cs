@@ -22,6 +22,7 @@ public sealed partial class App : Application
             var plugins = PluginService.Load(PluginCatalog.DefaultCachePath);
             var viewModel = new MainWindowViewModel(AudioBackendFactory.Create(), new SettingsStore(SettingsStore.DefaultPath), plugins.Registry);
             var window = new MainWindow { DataContext = viewModel };
+            PluginWindows.Owner = () => window.TryGetPlatformHandle()?.Handle ?? 0;
             window.Opened += async (_, _) => viewModel.AddPlugins(await plugins.RescanAsync(PluginCatalog.DefaultFolders));
 
             // Stop the audio devices and remember the settings however the app ends.

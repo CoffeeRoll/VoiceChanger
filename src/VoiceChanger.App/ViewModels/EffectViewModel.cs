@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VoiceChanger.Core.Effects;
+using VoiceChanger.Plugins;
 
 namespace VoiceChanger.App.ViewModels;
 
@@ -93,6 +94,7 @@ public abstract partial class EffectViewModel : ObservableObject
         EqualizerEffect equalizer => new EqualizerViewModel(equalizer, description),
         AutoTuneEffect autoTune => new AutoTuneViewModel(autoTune, description),
         PitchShiftEffect pitchShift => new PitchShiftViewModel(pitchShift, description),
+        PluginEffect plugin => new PluginEffectViewModel(plugin, description),
         _ => new GenericEffectViewModel(effect, description),
     };
 

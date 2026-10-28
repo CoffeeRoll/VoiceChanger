@@ -119,8 +119,24 @@ public sealed class PluginUiTests : IDisposable
         var vm = new MainWindowViewModel(new FakeAudioBackend(), store, registry);
 
         vm.AddEffectOptions.Single(o => o.Name == TestPlugin.ClassName).Command.Execute(null);
-        var card = Assert.IsType<GenericEffectViewModel>(vm.Effects[^1]);
+        var card = Assert.IsType<PluginEffectViewModel>(vm.Effects[^1]);
         Assert.Equal(["Gain", "Latency", "Sidechain Mix", "Hold"], card.Parameters.Select(p => p.Name));
+        Assert.Equal(["Default", "Loud", "Crushed"], card.Presets.Select(p => p.Name));
+        Assert.Equal("Runs inside VoiceChanger", card.HostingText);
+        Assert.Equal(OperatingSystem.IsWindows(), card.HasWindow);
+        Assert.False(card.HasProblem);
+
+        // The card shows the plug-in's controls.
+        var window = new MainWindow { DataContext = vm };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Single(window.GetLogicalDescendants().OfType<PluginEffectEditor>());
+        window.Close();
+
+        // A program sets the plug-in's values, and the card shows its name.
+        card.SelectedPreset = card.Presets[1];
+        Assert.Equal(TestPlugin.GainValue(6), card.Parameters[0].Parameter.Value, 4);
+        Assert.Equal("Loud", card.Summary);
         Assert.True(card.Parameters[0].IsSlider);
         Assert.True(card.Parameters[1].IsChoice);
         Assert.True(card.Parameters[2].IsToggle);

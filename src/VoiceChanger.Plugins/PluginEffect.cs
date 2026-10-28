@@ -99,7 +99,8 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable, IPluginEv
             }
         }
 
-        _bindings = [.. bindings];
+        // Program changes go first in a block: values set after choosing a program apply on top of it.
+        _bindings = [.. bindings.OrderBy(b => b.IsProgram ? 0 : 1)];
         AddPresets(description, hosting.PresetFolders);
         plugin.Events = this;
         _lastState = plugin.GetState();
@@ -632,7 +633,7 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable, IPluginEv
             parameter = EffectParameter.Integer(key, title, 0, steps, defaultStep, units, formatter: v => Format(id, v / steps, units));
         }
 
-        var binding = new Binding(id, steps, parameter, visible);
+        var binding = new Binding(id, steps, parameter, visible, (info.Flags & ParamFlags.ProgramChange) != 0);
         parameter.Value = binding.FromNormalized(info.Value);
         return binding;
     }
@@ -664,6 +665,12 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable, IPluginEv
 
     private string? SelectProgram(uint id, double value)
     {
+        // The program replaces edits the processor hasn't had yet.
+        lock (_gate)
+        {
+            DropQueuedChanges();
+        }
+
         if (_bindingsById.TryGetValue(id, out var binding))
         {
             Queue(binding, value);
@@ -897,7 +904,7 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable, IPluginEv
     private sealed record PresetSource(uint Program, double Value, string? Path);
 
     /// <summary>A plug-in parameter and the <see cref="EffectParameter"/> that shows it.</summary>
-    private sealed class Binding(uint id, int steps, EffectParameter parameter, bool isVisible)
+    private sealed class Binding(uint id, int steps, EffectParameter parameter, bool isVisible, bool isProgram)
     {
         /// <summary>The normalised value for the processor, valid while <see cref="Dirty"/> is set.</summary>
         public double Pending;
@@ -913,6 +920,9 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable, IPluginEv
 
         /// <summary>Whether the user sees it: not read-only, hidden, the bypass or the program.</summary>
         public bool IsVisible { get; } = isVisible;
+
+        /// <summary>Whether it selects a program.</summary>
+        public bool IsProgram { get; } = isProgram;
 
         /// <summary>The step a normalised value falls on, the way VST3 rounds.</summary>
         public static int StepOf(double normalized, int steps) =>
