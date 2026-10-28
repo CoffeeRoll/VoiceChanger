@@ -401,16 +401,17 @@ public:
     {
 #if SMTG_OS_WINDOWS
         if (std::strcmp(name, ViewType::kEditor) == 0)
-        {
-            view = new TestView(this, ViewRect(0, 0, 400, 300));
-            return view;
-        }
+            return new TestView(this, ViewRect(0, 0, 400, 300));
 #endif
         (void)name;
         return nullptr;
     }
 
 #if SMTG_OS_WINDOWS
+    // The view the controller talks to is the one on screen: a host may create views it never
+    // attaches (to ask what they support) and release them again.
+    void viewAttached(TestView* attached) { view = attached; }
+
     void viewRemoved(TestView* removed)
     {
         if (view == removed)
@@ -513,8 +514,11 @@ tresult PLUGIN_API TestView::attached(void* parent, FIDString type)
         return result;
     window = CreateWindowExW(0, L"VoiceChangerTestEditor", L"VoiceChanger Test Effect", WS_CHILD | WS_VISIBLE, 0, 0,
                              getRect().getWidth(), getRect().getHeight(), static_cast<HWND>(parent), nullptr, module(), nullptr);
+    if (!window)
+        return kResultFalse;
     SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-    return window ? kResultOk : kResultFalse;
+    controller->viewAttached(this);
+    return kResultOk;
 }
 
 tresult PLUGIN_API TestView::removed()

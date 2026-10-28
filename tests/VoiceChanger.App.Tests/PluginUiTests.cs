@@ -155,6 +155,8 @@ public sealed class PluginUiTests : IDisposable
         var effect = Assert.IsAssignableFrom<PluginEffect>(restored.Effects[^1].Effect);
         Assert.Equal(TestPlugin.GainValue(-6), effect.GetParameter("0").Value, 4);
         Assert.Equal(1, effect.GetParameter("1").Value);
+        ClosePlugins(vm);
+        ClosePlugins(restored);
     }
 
     [AvaloniaFact]
@@ -191,6 +193,18 @@ public sealed class PluginUiTests : IDisposable
 
         var error = Assert.Throws<PluginException>(() => PluginScanner.ScanInSeparateProcess(Path.Combine(_directory, "None.vst3"), app, []));
         Assert.False(string.IsNullOrWhiteSpace(error.Message));
+    }
+
+    /// <summary>
+    /// Closes the plug-ins in a chain here, on the UI thread, as the app does when they are removed,
+    /// rather than leaving them to the finalizer thread.
+    /// </summary>
+    private static void ClosePlugins(MainWindowViewModel vm)
+    {
+        foreach (var card in vm.Effects)
+        {
+            (card.Effect as IDisposable)?.Dispose();
+        }
     }
 
     private static EffectDescriptor Plugin(string name, string vendor) =>

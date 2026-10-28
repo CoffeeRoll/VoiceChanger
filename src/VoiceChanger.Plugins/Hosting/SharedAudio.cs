@@ -1,16 +1,22 @@
 using System.IO.MemoryMappedFiles;
+using System.Runtime.InteropServices;
 using VoiceChanger.Plugins.Native;
 
 namespace VoiceChanger.Plugins.Hosting;
 
-/// <summary>A named semaphore shared by the app and a host process (through the native bridge).</summary>
-internal sealed class NamedSignal : IDisposable
+/// <summary>
+/// A named semaphore shared by the app and a host process (through the native bridge). Another
+/// thread may still post or wait while it is disposed (a reply thread waking an audio thread, say):
+/// the native signal is closed once the last of those calls returns, and calls after that fail.
+/// </summary>
+internal sealed class NamedSignal : SafeHandle
 {
-    private nint _handle;
+    private NamedSignal(nint handle)
+        : base(0, ownsHandle: true) => SetHandle(handle);
 
-    private NamedSignal(nint handle) => _handle = handle;
+    public override bool IsInvalid => handle == 0;
 
-    /// <summary>Creates the signal; the creator's <see cref="Dispose"/> removes the name.</summary>
+    /// <summary>Creates the signal; the creator's <see cref="SafeHandle.Dispose()"/> removes the name.</summary>
     public static NamedSignal Create(string name)
     {
         nint handle = VcPlugin.CreateSignal(name);
@@ -23,18 +29,53 @@ internal sealed class NamedSignal : IDisposable
         return handle != 0 ? new NamedSignal(handle) : throw new PluginException(VcPlugin.LastError);
     }
 
-    public void Post() => VcPlugin.PostSignal(_handle);
-
-    /// <summary>Returns 1 when posted, 0 on timeout, negative on error.</summary>
-    public int Wait(int timeoutMilliseconds) => VcPlugin.WaitSignal(_handle, timeoutMilliseconds);
-
-    public void Dispose()
+    public void Post()
     {
-        nint handle = Interlocked.Exchange(ref _handle, 0);
-        if (handle != 0)
+        bool added = false;
+        try
         {
-            VcPlugin.CloseSignal(handle);
+            DangerousAddRef(ref added);
+            VcPlugin.PostSignal(handle);
         }
+        catch (ObjectDisposedException)
+        {
+            // Closed: nobody waits on it any more.
+        }
+        finally
+        {
+            if (added)
+            {
+                DangerousRelease();
+            }
+        }
+    }
+
+    /// <summary>Returns 1 when posted, 0 on timeout, negative on error (also once closed).</summary>
+    public int Wait(int timeoutMilliseconds)
+    {
+        bool added = false;
+        try
+        {
+            DangerousAddRef(ref added);
+            return VcPlugin.WaitSignal(handle, timeoutMilliseconds);
+        }
+        catch (ObjectDisposedException)
+        {
+            return VcPlugin.ErrorFailed;
+        }
+        finally
+        {
+            if (added)
+            {
+                DangerousRelease();
+            }
+        }
+    }
+
+    protected override bool ReleaseHandle()
+    {
+        VcPlugin.CloseSignal(handle);
+        return true;
     }
 }
 

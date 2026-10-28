@@ -41,6 +41,20 @@ jobs:
       - name: Test
         run: dotnet test VoiceChanger.sln -c Release --no-build
 
+      # Temporary: the app tests' process crashed now and then on Windows. Run them a few more times
+      # directly, so the log shows which tests were running and what the process printed.
+      - name: Repeat the app tests
+        if: always() && runner.os == 'Windows'
+        run: |
+          $failed = 0
+          for ($i = 1; $i -le 5; $i++) {
+            Write-Host "=== Run $i ==="
+            & tests/VoiceChanger.App.Tests/bin/Release/net10.0/VoiceChanger.App.Tests.exe -noColor -noLogo -reporter verbose
+            Write-Host "=== Run $i ended with exit code $LASTEXITCODE ==="
+            if ($LASTEXITCODE -ne 0) { $failed++ }
+          }
+          if ($failed -gt 0) { exit 1 }
+
       - name: Upload UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
