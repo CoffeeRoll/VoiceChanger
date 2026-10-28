@@ -125,11 +125,22 @@
           </StackPanel>
 
           <StackPanel Spacing="2">
-            <Grid ColumnDefinitions="*,Auto">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4">
               <TextBlock Classes="label" Text="Input gain" />
-              <TextBlock Grid.Column="1" Classes="value" Text="{Binding InputGainDb, StringFormat='{}{0:+0.0;-0.0;0.0} dB'}" />
+              <Button Grid.Column="1"
+                      Classes="reset"
+                      IsVisible="{Binding IsInputGainChanged}"
+                      Command="{Binding ResetInputGainCommand}"
+                      ToolTip.Tip="Reset to 0.0 dB">
+                <Path Classes="icon" Data="{StaticResource IconReset}" />
+              </Button>
+              <TextBlock Grid.Column="2" Classes="value" Text="{Binding InputGainDb, StringFormat='{}{0:+0.0;-0.0;0.0} dB'}" />
             </Grid>
-            <Slider Minimum="-24" Maximum="24" SmallChange="0.5" LargeChange="3" Value="{Binding InputGainDb}" />
+            <Slider x:Name="InputGainSlider"
+                    Minimum="-24" Maximum="24" SmallChange="0.5" LargeChange="3"
+                    Value="{Binding InputGainDb}"
+                    views:SliderReset.Default="0"
+                    ToolTip.Tip="Double-click, Ctrl+click or press Delete to reset to 0.0 dB." />
           </StackPanel>
 
           <StackPanel Spacing="6">
@@ -274,11 +285,22 @@
           </StackPanel>
 
           <StackPanel Spacing="2">
-            <Grid ColumnDefinitions="*,Auto">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4">
               <TextBlock Classes="label" Text="Volume" />
-              <TextBlock Grid.Column="1" Classes="value" Text="{Binding OutputGainDb, StringFormat='{}{0:+0.0;-0.0;0.0} dB'}" />
+              <Button Grid.Column="1"
+                      Classes="reset"
+                      IsVisible="{Binding IsOutputGainChanged}"
+                      Command="{Binding ResetOutputGainCommand}"
+                      ToolTip.Tip="Reset to 0.0 dB">
+                <Path Classes="icon" Data="{StaticResource IconReset}" />
+              </Button>
+              <TextBlock Grid.Column="2" Classes="value" Text="{Binding OutputGainDb, StringFormat='{}{0:+0.0;-0.0;0.0} dB'}" />
             </Grid>
-            <Slider Minimum="-40" Maximum="12" SmallChange="0.5" LargeChange="3" Value="{Binding OutputGainDb}" />
+            <Slider x:Name="VolumeSlider"
+                    Minimum="-40" Maximum="12" SmallChange="0.5" LargeChange="3"
+                    Value="{Binding OutputGainDb}"
+                    views:SliderReset.Default="0"
+                    ToolTip.Tip="Double-click, Ctrl+click or press Delete to reset to 0.0 dB." />
           </StackPanel>
 
           <StackPanel Spacing="6">

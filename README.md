@@ -70,11 +70,15 @@ Tips:
   [VB-CABLE](https://vb-audio.com/Cable/). Select *CABLE Input* as the **output** in VoiceChanger, then
   select *CABLE Output* as the **microphone** in the other app.
 - **Collapse effects to make room.** Click an effect's name (or the arrow next to it) to fold the
-  card down to a one-line summary of its settings, e.g. "+1 octave · formants kept" or, for
+  card down to a one-line summary of its settings, e.g. "+1 octave · formants kept (spectral)" or, for
   Auto Tune while you sing, "D4 → D4 · A minor · instant retune". **Collapse all** / **Expand all**
   in the Effects header folds or opens every card. Collapsed cards stay collapsed the next time you
   start the app.
-- **Double-click any effect slider** to reset it to its default value.
+- **Put any slider back to its default** (0 for pitch, gains and EQ bands): double-click it anywhere,
+  Ctrl+click it, or press **Delete** or **Backspace** while it has focus. A small ↺ button also appears
+  next to a slider's value while it is away from its default; click it to reset just that slider. The
+  ↺ in an effect's header resets the whole effect. This works for every slider, including the input
+  gain and volume, and those in the node editor's inspector.
 - **If you hear crackles or dropouts**, choose a safer latency setting under Output. The status bar
   counts dropouts while audio is running.
 - Settings are saved to `%APPDATA%\VoiceChanger\settings.json`.

@@ -10,7 +10,7 @@
                                     Frequencies="{Binding ResponseFrequencies}"
                                     Response="{Binding Response}" />
 
-    <!-- Graphic bands: drag up to boost, down to cut. Double-click a slider to reset it. -->
+    <!-- Graphic bands: drag up to boost, down to cut. Double-click, Ctrl+click or Delete resets a band. -->
     <ItemsControl ItemsSource="{Binding Bands}">
       <ItemsControl.ItemsPanel>
         <ItemsPanelTemplate>
@@ -32,7 +32,7 @@
                     SmallChange="0.02"
                     LargeChange="0.125"
                     Value="{Binding Position}"
-                    ToolTip.Tip="Double-click to reset" />
+                    ToolTip.Tip="{Binding ToolTip}" />
             <TextBlock Classes="label"
                        HorizontalAlignment="Center"
                        Text="{Binding Name}" />

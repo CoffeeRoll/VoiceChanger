@@ -115,10 +115,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public partial bool MonoProcessing { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsInputGainChanged))]
     public partial double InputGainDb { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsOutputGainChanged))]
     public partial double OutputGainDb { get; set; }
+
+    /// <summary>Whether the input gain is away from 0 dB, so its reset button shows.</summary>
+    public bool IsInputGainChanged => InputGainDb != 0;
+
+    public bool IsOutputGainChanged => OutputGainDb != 0;
 
     public string BackendName { get; }
 
@@ -384,6 +391,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     partial void OnSelectedLatencyChanged(LatencyOption value) => RestartIfRunning();
 
     partial void OnMonoProcessingChanged(bool value) => RestartIfRunning();
+
+    [RelayCommand]
+    private void ResetInputGain() => InputGainDb = 0;
+
+    [RelayCommand]
+    private void ResetOutputGain() => OutputGainDb = 0;
 
     partial void OnInputGainDbChanged(double value) => _engine.InputGainDb = (float)value;
 

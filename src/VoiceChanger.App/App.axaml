@@ -193,6 +193,28 @@
       <Setter Property="StrokeLineCap" Value="Round" />
       <Setter Property="StrokeJoin" Value="Round" />
     </Style>
+    <!-- Small reset button next to a slider's value, shown while it is away from its default. -->
+    <Style Selector="Button.reset">
+      <Setter Property="Width" Value="18" />
+      <Setter Property="Height" Value="18" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0,-2" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.reset Path.icon">
+      <Setter Property="Width" Value="11" />
+      <Setter Property="Height" Value="11" />
+      <Setter Property="Stroke" Value="{StaticResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="Button.reset:pointerover Path.icon">
+      <Setter Property="Stroke" Value="{StaticResource TextPrimaryBrush}" />
+    </Style>
+
     <Style Selector="Button.icon:disabled /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="Transparent" />
     </Style>

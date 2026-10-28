@@ -120,13 +120,20 @@
                             <DataTemplate x:DataType="vm:MixerChannelViewModel">
                               <Border Classes="channel" Classes.muted="{Binding Mute.IsOn}">
                                 <StackPanel Spacing="2">
-                                  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                                  <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                       <TextBlock Classes="value" FontWeight="SemiBold" Text="{Binding Name}" />
                                       <TextBlock Classes="label" Text="not connected" IsVisible="{Binding !IsConnected}" />
                                     </StackPanel>
-                                    <TextBlock Grid.Column="1" Classes="value" Text="{Binding Gain.DisplayValue}" />
-                                    <ToggleButton Grid.Column="2"
+                                    <Button Grid.Column="1"
+                                            Classes="reset"
+                                            IsVisible="{Binding Gain.CanReset}"
+                                            Command="{Binding Gain.ResetCommand}"
+                                            ToolTip.Tip="{Binding Gain.DefaultText, StringFormat='Reset to {0}'}">
+                                      <Path Classes="icon" Data="{StaticResource IconReset}" />
+                                    </Button>
+                                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding Gain.DisplayValue}" />
+                                    <ToggleButton Grid.Column="3"
                                                   Classes="mute"
                                                   Content="M"
                                                   IsChecked="{Binding Mute.IsOn}"
@@ -138,7 +145,7 @@
                                           SmallChange="0.01"
                                           LargeChange="0.1"
                                           Value="{Binding Position}"
-                                          ToolTip.Tip="Volume of this input. Double-click to reset." />
+                                          ToolTip.Tip="{Binding ToolTip}" />
                                   <controls:LevelMeter Level="{Binding LevelDb}" Height="4" />
                                 </StackPanel>
                               </Border>
@@ -175,13 +182,20 @@
                             <DataTemplate x:DataType="vm:SyncChannelViewModel">
                               <Border Classes="channel">
                                 <StackPanel Spacing="2">
-                                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                       <TextBlock Classes="value" FontWeight="SemiBold" Text="{Binding Name}" />
                                       <TextBlock Classes="label" Text="not connected" IsVisible="{Binding !IsConnected}" />
                                       <TextBlock Classes="label" Text="{Binding Delay}" />
                                     </StackPanel>
-                                    <TextBlock Grid.Column="1" Classes="value" Text="{Binding Offset.DisplayValue}" />
+                                    <Button Grid.Column="1"
+                                            Classes="reset"
+                                            IsVisible="{Binding Offset.CanReset}"
+                                            Command="{Binding Offset.ResetCommand}"
+                                            ToolTip.Tip="{Binding Offset.DefaultText, StringFormat='Reset to {0}'}">
+                                      <Path Classes="icon" Data="{StaticResource IconReset}" />
+                                    </Button>
+                                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding Offset.DisplayValue}" />
                                   </Grid>
                                   <Slider DataContext="{Binding Offset}"
                                           Minimum="0"
@@ -189,7 +203,7 @@
                                           SmallChange="{Binding SmallChange}"
                                           LargeChange="0.1"
                                           Value="{Binding Position}"
-                                          ToolTip.Tip="{Binding Description}" />
+                                          ToolTip.Tip="{Binding ToolTip}" />
                                   <controls:LevelMeter Level="{Binding LevelDb}" Height="4" />
                                 </StackPanel>
                               </Border>

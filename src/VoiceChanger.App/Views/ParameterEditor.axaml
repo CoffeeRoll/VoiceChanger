@@ -7,11 +7,18 @@
   <StackPanel Spacing="2"
               Background="Transparent"
               IsEnabled="{Binding IsAvailable}"
-              ToolTip.Tip="{Binding Description}"
+              ToolTip.Tip="{Binding ToolTip}"
               ToolTip.ShowOnDisabled="True">
-    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4">
       <TextBlock Classes="label" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-      <TextBlock Grid.Column="1"
+      <Button Grid.Column="1"
+              Classes="reset"
+              IsVisible="{Binding CanReset}"
+              Command="{Binding ResetCommand}"
+              ToolTip.Tip="{Binding DefaultText, StringFormat='Reset to {0}'}">
+        <Path Classes="icon" Data="{StaticResource IconReset}" />
+      </Button>
+      <TextBlock Grid.Column="2"
                  Classes="value"
                  IsVisible="{Binding IsSlider}"
                  Text="{Binding DisplayValue}" />

@@ -94,6 +94,17 @@ public sealed partial class ParameterViewModel : ObservableObject
 
     public string DisplayValue => Parameter.FormattedValue;
 
+    /// <summary>The value <see cref="ResetCommand"/> goes back to, as shown, e.g. "0 cents".</summary>
+    public string DefaultText => Parameter.Format(Parameter.DefaultValue);
+
+    /// <summary>Whether a slider is away from its default, so the reset button shows.</summary>
+    public bool CanReset => IsSlider && !Parameter.IsDefault;
+
+    /// <summary>The parameter's description, plus how to reset it for sliders.</summary>
+    public string? ToolTip => IsSlider
+        ? (Description is null ? "" : Description + "\n\n") + $"Double-click, Ctrl+click or press Delete to reset to {DefaultText}."
+        : Description;
+
     /// <summary>False while the setting has no effect (it depends on another one); shown greyed out.</summary>
     public bool IsAvailable => Parameter.IsAvailable;
 
@@ -124,6 +135,7 @@ public sealed partial class ParameterViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedIndex));
         OnPropertyChanged(nameof(IsOn));
         OnPropertyChanged(nameof(DisplayValue));
+        OnPropertyChanged(nameof(CanReset));
         foreach (var option in Options)
         {
             option.Refresh();
