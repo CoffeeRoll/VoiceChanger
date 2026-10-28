@@ -144,6 +144,9 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
 
     public override int LatencyFrames => _active ? _latency : 0;
 
+    /// <summary>Whether the native bridge is there to load plug-ins with, and why not when it isn't.</summary>
+    public static bool IsBridgeAvailable(out string? problem) => VcPlugin.IsAvailable(out problem);
+
     /// <summary>
     /// Loads a plug-in. With a side-chain input it is also an <see cref="ISidechainEffect"/>, so its
     /// node gets a second input.

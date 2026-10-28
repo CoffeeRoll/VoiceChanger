@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Windows.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -15,8 +16,43 @@ public sealed record LatencyOption(LatencyPreset Preset, string Name, string Des
     public override string ToString() => Name;
 }
 
-/// <summary>An entry of the "Add effect" menu.</summary>
-public sealed record AddEffectOption(string Name, string Description, IRelayCommand Command);
+/// <summary>An effect that can be added, with the command that adds it.</summary>
+public sealed record AddEffectOption(string Name, string Description, IRelayCommand Command, string? Group = null);
+
+/// <summary>An entry of an "Add" menu: something to add, or a submenu of <see cref="Items"/>.</summary>
+public sealed record AddMenuEntry(string Name, string? Description, ICommand? Command, IReadOnlyList<AddMenuEntry>? Items = null)
+{
+    /// <summary>The submenu plug-ins are listed in, by vendor.</summary>
+    public const string PluginsName = "Plug-ins";
+
+    /// <summary>
+    /// Menu entries for <paramref name="options"/>: the built-in ones as they are, the grouped ones
+    /// (plug-ins) in a submenu per group, those in a "Plug-ins" submenu placed where
+    /// <paramref name="pluginsAfter"/> says (after the last built-in entry by default).
+    /// </summary>
+    public static IReadOnlyList<AddMenuEntry> Build<T>(
+        IReadOnlyList<T> options,
+        Func<T, string?> group,
+        Func<T, AddMenuEntry> entry,
+        Func<T, bool>? pluginsAfter = null)
+    {
+        var groups = options
+            .Where(o => group(o) is not null)
+            .GroupBy(o => group(o)!, StringComparer.CurrentCultureIgnoreCase)
+            .OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
+            .Select(g => new AddMenuEntry(g.Key, null, null, g.Select(entry).OrderBy(e => e.Name, StringComparer.CurrentCultureIgnoreCase).ToList()))
+            .ToList();
+        var builtIn = options.Where(o => group(o) is null).ToList();
+        var menu = builtIn.Select(entry).ToList();
+        if (groups.Count > 0)
+        {
+            int index = pluginsAfter is null ? builtIn.Count : builtIn.FindLastIndex(o => pluginsAfter(o)) + 1;
+            menu.Insert(index, new AddMenuEntry(PluginsName, "VST3 effects installed on this computer", null, groups));
+        }
+
+        return menu;
+    }
+}
 
 /// <summary>
 /// State of the main window: device selection, the effect chain or the node graph, the master
@@ -56,9 +92,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             new(LatencyPreset.Safe, "Safe", "Largest buffers. Use this if you hear crackles or dropouts."),
         ];
         AvailableEffects = _registry.Descriptors;
-        AddEffectOptions = AvailableEffects
-            .Select(d => new AddEffectOption(d.Name, d.Description, new RelayCommand(() => AddEffect(d))))
-            .ToList();
+        BuildAddEffectOptions();
         BackendName = backend.Name;
         IsBackendSupported = backend.IsSupported;
 
@@ -169,7 +203,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<EffectDescriptor> AvailableEffects { get; }
 
-    public IReadOnlyList<AddEffectOption> AddEffectOptions { get; }
+    /// <summary>Every effect that can be added.</summary>
+    public IReadOnlyList<AddEffectOption> AddEffectOptions { get; private set; } = [];
+
+    /// <summary>The "Add effect" menu: the built-in effects, then the plug-ins by vendor.</summary>
+    public IReadOnlyList<AddMenuEntry> AddEffectMenu { get; private set; } = [];
 
     public ObservableCollection<EffectViewModel> Effects { get; } = [];
 
@@ -246,9 +284,34 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void AddEffect(EffectDescriptor descriptor)
     {
-        AddEffectViewModel(descriptor.Create(), descriptor);
+        var effect = descriptor.Create();
+        if (effect is MissingEffect)
+        {
+            ErrorMessage = $"{descriptor.Name} could not be loaded.";
+            return;
+        }
+
+        AddEffectViewModel(effect, descriptor);
         _engine.Effects.Add(Effects[^1].Effect);
         UpdatePositions();
+    }
+
+    /// <summary>Puts plug-ins found after the window opened into the "Add" menus.</summary>
+    public void AddPlugins(IEnumerable<EffectDescriptor> plugins)
+    {
+        var added = plugins.ToList();
+        if (added.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var plugin in added.Where(p => _nodeRegistry.Find(EffectNode.TypePrefix + p.TypeId) is null))
+        {
+            _nodeRegistry.RegisterEffect(plugin);
+        }
+
+        BuildAddEffectOptions();
+        NodeEditor.BuildAddNodeOptions();
     }
 
     [RelayCommand]
@@ -659,8 +722,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             foreach (var entry in saved)
             {
                 var effect = entry.Restore(_registry);
-                var descriptor = _registry.Find(entry.Type);
-                if (effect is not null && descriptor is not null)
+                if (effect is null)
+                {
+                    continue;
+                }
+
+                // A plug-in that isn't installed comes back as a stand-in that keeps its settings.
+                var descriptor = effect is MissingEffect
+                    ? new EffectDescriptor(effect.TypeId, effect.Name, MissingEffect.Explanation, () => effect)
+                    : _registry.Find(entry.Type);
+                if (descriptor is not null)
                 {
                     AddEffectViewModel(effect, descriptor).IsCollapsed = entry.Collapsed;
                     _engine.Effects.Add(effect);
@@ -669,6 +740,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         UpdatePositions();
+    }
+
+    private void BuildAddEffectOptions()
+    {
+        AddEffectOptions = AvailableEffects
+            .Select(d => new AddEffectOption(d.Name, d.Description, new RelayCommand(() => AddEffect(d)), d.Group))
+            .ToList();
+        AddEffectMenu = AddMenuEntry.Build(AddEffectOptions, o => o.Group, o => new AddMenuEntry(o.Name, o.Description, o.Command));
+        OnPropertyChanged(nameof(AddEffectOptions));
+        OnPropertyChanged(nameof(AddEffectMenu));
     }
 
     private static EffectSettings CaptureEffect(EffectViewModel viewModel)

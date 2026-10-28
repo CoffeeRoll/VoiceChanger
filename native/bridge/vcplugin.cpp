@@ -18,6 +18,7 @@
 #include "public.sdk/source/vst/utility/stringconvert.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -25,8 +26,8 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
-#include <windows.h>
+#if defined(_MSC_VER)
+#include <excpt.h>
 #endif
 
 using namespace Steinberg;

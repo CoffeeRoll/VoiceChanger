@@ -7,6 +7,10 @@ namespace VoiceChanger.Core.Effects;
 /// </summary>
 public class MissingEffect : AudioEffect, IStatefulEffect
 {
+    /// <summary>What the app says about a missing plug-in.</summary>
+    public const string Explanation =
+        "This plug-in isn't installed or didn't load. Its settings are kept and the audio passes through unchanged.";
+
     private readonly byte[]? _state;
 
     protected MissingEffect(string typeId, string? savedName, IReadOnlyDictionary<string, float>? savedParameters, byte[]? state)

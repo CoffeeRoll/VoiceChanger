@@ -24,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\VoiceChanger.Core\VoiceChanger.Core.csproj" />
     <ProjectReference Include="..\VoiceChanger.Audio.Wasapi\VoiceChanger.Audio.Wasapi.csproj" />
+    <ProjectReference Include="..\VoiceChanger.Plugins\VoiceChanger.Plugins.csproj" />
   </ItemGroup>
 
   <ItemGroup>

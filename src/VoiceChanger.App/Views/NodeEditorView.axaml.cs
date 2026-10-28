@@ -89,22 +89,51 @@ public sealed partial class NodeEditorView : UserControl
 
         var menu = new MenuFlyout { Placement = PlacementMode.Pointer };
         NodeCategory? category = null;
-        foreach (var option in _viewModel.AddNodeOptions)
+        var plugins = _viewModel.AddNodeOptions.Where(o => o.Descriptor.Group is not null).ToList();
+        foreach (var option in _viewModel.AddNodeOptions.Where(o => o.Descriptor.Group is null))
         {
             if (category is not null && option.Descriptor.Category != category)
             {
+                // The plug-ins (all effects) go at the end of the effects.
+                if (category == NodeCategory.Effect && plugins.Count > 0)
+                {
+                    menu.Items.Add(CreatePluginsMenu(plugins, worldPosition));
+                }
+
                 menu.Items.Add(new Separator());
             }
 
             category = option.Descriptor.Category;
-            var item = new MenuItem { Header = option.Name };
-            ToolTip.SetTip(item, option.Description);
-            var descriptor = option.Descriptor;
-            item.Click += (_, _) => _viewModel.AddNode(descriptor, worldPosition);
-            menu.Items.Add(item);
+            menu.Items.Add(CreateAddItem(option, worldPosition));
         }
 
         menu.ShowAt(Viewport, showAtPointer: true);
+    }
+
+    private MenuItem CreatePluginsMenu(IReadOnlyList<AddNodeOption> plugins, Point worldPosition)
+    {
+        var menu = new MenuItem { Header = AddMenuEntry.PluginsName };
+        foreach (var vendor in plugins.GroupBy(o => o.Descriptor.Group!, StringComparer.CurrentCultureIgnoreCase).OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase))
+        {
+            var item = new MenuItem { Header = vendor.Key };
+            foreach (var option in vendor.OrderBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase))
+            {
+                item.Items.Add(CreateAddItem(option, worldPosition));
+            }
+
+            menu.Items.Add(item);
+        }
+
+        return menu;
+    }
+
+    private MenuItem CreateAddItem(AddNodeOption option, Point worldPosition)
+    {
+        var item = new MenuItem { Header = option.Name };
+        ToolTip.SetTip(item, option.Description);
+        var descriptor = option.Descriptor;
+        item.Click += (_, _) => _viewModel?.AddNode(descriptor, worldPosition);
+        return item;
     }
 
     internal void RegisterSocket(NodeSocket socket) => _sockets.Add(socket);

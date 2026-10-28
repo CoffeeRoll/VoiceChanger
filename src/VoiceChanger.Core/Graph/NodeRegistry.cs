@@ -5,6 +5,9 @@ namespace VoiceChanger.Core.Graph;
 /// <summary>Describes a node type that can be added to a graph.</summary>
 public sealed record NodeDescriptor(string TypeId, string Name, string Description, NodeCategory Category, Func<AudioNode> Create)
 {
+    /// <summary>Where menus list it: <c>null</c> for the built-in nodes, the vendor for a plug-in (see <see cref="EffectDescriptor.Group"/>).</summary>
+    public string? Group { get; init; }
+
     public override string ToString() => Name;
 }
 
@@ -35,12 +38,7 @@ public sealed class NodeRegistry
             () => new ToneNode()));
         foreach (var effect in effects.Descriptors)
         {
-            registry.Register(new NodeDescriptor(
-                EffectNode.TypePrefix + effect.TypeId,
-                effect.Name,
-                effect.Description,
-                NodeCategory.Effect,
-                () => new EffectNode(effect.Create())));
+            registry.RegisterEffect(effect);
         }
 
         registry.Register(new NodeDescriptor(
@@ -73,6 +71,23 @@ public sealed class NodeRegistry
         }
 
         _descriptors.Add(descriptor);
+    }
+
+    /// <summary>Adds the node of an effect type, e.g. a plug-in found after the registry was made.</summary>
+    public NodeDescriptor RegisterEffect(EffectDescriptor effect)
+    {
+        ArgumentNullException.ThrowIfNull(effect);
+        var descriptor = new NodeDescriptor(
+            EffectNode.TypePrefix + effect.TypeId,
+            effect.Name,
+            effect.Description,
+            NodeCategory.Effect,
+            () => new EffectNode(effect.Create()))
+        {
+            Group = effect.Group,
+        };
+        Register(descriptor);
+        return descriptor;
     }
 
     public NodeDescriptor? Find(string typeId) =>

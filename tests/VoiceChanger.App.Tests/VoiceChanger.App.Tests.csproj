@@ -25,6 +25,8 @@
   <ItemGroup>
     <!-- Share the fake audio devices with the core tests. -->
     <Compile Include="..\VoiceChanger.Core.Tests\FakeAudioBackend.cs" Link="FakeAudioBackend.cs" />
+    <!-- And the test plug-in with the plug-in tests. -->
+    <Compile Include="..\VoiceChanger.Plugins.Tests\TestPlugin.cs" Link="TestPlugin.cs" />
   </ItemGroup>
 
 </Project>

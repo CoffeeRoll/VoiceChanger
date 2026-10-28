@@ -1,6 +1,6 @@
 # Spec: hosting third-party VST3 plugins
 
-Status: proposal · Scope: Windows, effect plugins · Last updated: 2026-10-27
+Status: M1 implemented (see [section 15](#15-m1-as-built)) · Scope: Windows, effect plugins · Last updated: 2026-10-28
 
 ## 1. Summary
 
@@ -290,3 +290,43 @@ P/Invoke, since the API is plain C). Type ids would be `clap:{id}`.
 - **Editor quirks:** DPI scaling, resizing, and plugins that assume a particular window parent.
   Hosting in a separate top-level window avoids most layout issues.
 - **Native build in CI:** adds a CMake step and per-architecture artifacts to the Windows job.
+
+## 15. M1 as built
+
+Milestone M1 ("plugins play") is implemented. Where it differs from the plan above:
+
+- **C API** (`native/bridge/vcplugin.h`): strings are UTF-8 on every platform. `vc_scan` lists a module's
+  classes, `vc_param_describe` (not `vc_param_info`, which names the struct) describes a parameter,
+  `vc_reset` clears a plugin's history (`setProcessing` off and on, allowed on the audio thread), and
+  `vc_suspend` deactivates. Callbacks are registered with `vc_set_callbacks`. The editor functions
+  come with M2.
+- **Buses:** the bridge asks the plugin for the host's channel count, then stereo, then takes what the
+  plugin has, and converts between mono and stereo itself. An unconnected side-chain bus is fed the
+  main input.
+- **Latency changes:** VST3 says the host must deactivate and reactivate a plugin after
+  `kLatencyChanged` before reading the new latency. `PluginEffect` does that on the UI thread: it
+  hands queued parameter changes to the processor (a zero-frame `process` call), sets the plugin up
+  again, and reads the latency. Meanwhile the audio thread doesn't wait: it passes that block through.
+- **Parameters:** continuous parameters run from 0 to 1, lists become choices (up to 64 entries),
+  one-step parameters toggles, other stepped ones whole numbers, all formatted with the plugin's
+  text. Read-only, hidden, bypass and program-change parameters are left out; the effect's own switch
+  bypasses. Edits are queued per parameter (a dirty flag and the latest value), so the queue never
+  allocates and never drops an edit.
+- **State:** `IStatefulEffect` in Core. `EffectSettings` and `NodeSettings` gain `State` (base64) and
+  `Name`. Before saving, edits that haven't reached the processor yet are delivered (setting the plugin
+  up briefly if audio never ran), because the processor's state is what VST3 saves.
+- **Missing plugins:** `MissingEffect` stands in for any saved effect whose type has a prefix
+  (`vst3:`) and that isn't installed or doesn't load. It keeps the parameters, state and name, and
+  keeps a side-chain socket when something was wired into it.
+- **Scanning:** there is no separate `PluginScanner.exe`. The app runs itself with
+  `--scan-plugin <path>`, which keeps the published app a single file. `moduleinfo.json` (written by
+  the SDK with trailing commas) is read first. A module that fails to scan is remembered with the
+  reason and left out until it changes. The plugin manager and block-list UI come with M2.
+- **Menus:** `EffectDescriptor.Group` (and `NodeDescriptor.Group`) holds the vendor; the menus put
+  plugins in a *Plug-ins* submenu by vendor.
+- **Crash guard:** Windows only (`__try`/`__except` in `vc_process`). A crashed plugin passes audio
+  through from then on.
+- **Tests:** one test plugin (`native/testplugin`) covers both planned ones: a continuous gain, a list
+  that changes the latency, an on/off side-chain mix with a mono auxiliary bus, a stepped
+  sample-and-hold, a bypass, state, and a hidden "crash" switch for the crash-guard test (Windows).
+  CI builds `native/` with CMake on Windows and Linux before the .NET build.

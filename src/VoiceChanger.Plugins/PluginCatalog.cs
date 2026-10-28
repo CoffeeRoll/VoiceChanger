@@ -74,9 +74,8 @@ public sealed class PluginCatalog(string cachePath)
         string[] arguments = [];
         if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
         {
-            // Started as "dotnet VoiceChanger.dll".
-            string entry = System.Reflection.Assembly.GetEntryAssembly()?.Location ?? "";
-            arguments = [entry];
+            // Started as "dotnet VoiceChanger.dll": that path comes first on the command line.
+            arguments = [Environment.GetCommandLineArgs()[0]];
         }
 
         return PluginScanner.ScanInSeparateProcess(modulePath, executable, arguments);
