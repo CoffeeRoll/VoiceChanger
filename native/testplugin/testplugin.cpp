@@ -1,22 +1,34 @@
 // "VoiceChanger Test Effect": a small VST3 effect the tests host through vcplugin. It has one
 // parameter of each kind the host maps (continuous, list, on/off, stepped, bypass, hidden), a
-// side-chain input, latency it reports, and state it saves.
+// side-chain input, latency it reports, state it saves, a program list, and (on Windows) a window.
 //
 //   output = delay(hold(input * gain + sidechain when "Sidechain Mix" is on), latency)
 //
-// "Crash" makes the next processed block write through a null pointer, for the host's crash guard.
+// "Crash" makes the next processed block write through a null pointer, for the host's crash guard;
+// "Hang" makes it never return, for an out-of-process host's watchdog. Setting "Editor Width"
+// makes the window ask the host for that width; a click in the window turns the gain up (an edit
+// the host hears of); "Editor Scale" shows the scale factor the host gave the window.
 
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/base/ibstream.h"
+#include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
+#include "public.sdk/source/common/pluginview.h"
 #include "public.sdk/source/vst/vstaudioeffect.h"
 #include "public.sdk/source/vst/vsteditcontroller.h"
 // Last: it replaces the factory macros the other headers define.
 #include "public.sdk/source/main/pluginfactory_constexpr.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstring>
+#include <thread>
 #include <vector>
+
+#if SMTG_OS_WINDOWS
+#include <windows.h>
+#endif
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
@@ -34,7 +46,11 @@ enum ParamIds : ParamID
     kBypass = 3,
     kHold = 4,
     kCrash = 5,
-    kParamCount = 6
+    kProgram = 6,     // the program list's parameter (its id is the list's)
+    kHang = 7,
+    kEditorWidth = 8,
+    kEditorScale = 9,
+    kParamCount = 10
 };
 
 constexpr double kMinGainDb = -24;
@@ -43,6 +59,26 @@ constexpr int32 kLatencies[] = {0, 64, 480};
 constexpr int32 kLatencySteps = 2;
 constexpr int32 kHoldSteps = 7; // hold 1 to 8 samples
 constexpr int32 kStateVersion = 1;
+
+// The factory programs: gain (dB) and hold (samples).
+struct Program
+{
+    const char16_t* name;
+    double gainDb;
+    int32 hold;
+};
+constexpr Program kPrograms[] = {{u"Default", 0, 1}, {u"Loud", 6, 1}, {u"Crushed", 0, 4}};
+constexpr int32 kProgramSteps = 2;
+
+double gainValue(double decibels)
+{
+    return (decibels - kMinGainDb) / (kMaxGainDb - kMinGainDb);
+}
+
+double holdValue(int32 hold)
+{
+    return static_cast<double>(hold - 1) / kHoldSteps;
+}
 
 double defaultValue(ParamID id)
 {
@@ -137,8 +173,15 @@ public:
                 IParamValueQueue* queue = changes->getParameterData(i);
                 ParamValue value = 0;
                 int32 offset = 0;
-                if (queue && queue->getParameterId() < kParamCount && queue->getPoint(queue->getPointCount() - 1, offset, value) == kResultTrue)
-                    values[queue->getParameterId()] = value;
+                if (!queue || queue->getParameterId() >= kParamCount || queue->getPoint(queue->getPointCount() - 1, offset, value) != kResultTrue)
+                    continue;
+                values[queue->getParameterId()] = value;
+                if (queue->getParameterId() == kProgram)
+                {
+                    const Program& program = kPrograms[stepOf(value, kProgramSteps)];
+                    values[kGain] = gainValue(program.gainDb);
+                    values[kHold] = holdValue(program.hold);
+                }
             }
         }
 
@@ -150,6 +193,9 @@ public:
             volatile int* nowhere = nullptr;
             *nowhere = 1;
         }
+
+        while (values[kHang] > 0.5)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
 
         const AudioBusBuffers& input = data.inputs[0];
         const AudioBusBuffers* key = data.numInputs > 1 && getAudioInput(1)->isActive() ? &data.inputs[1] : nullptr;
@@ -230,16 +276,101 @@ private:
     int32 holdCounter = 0;
 };
 
-class TestController : public EditController
+class TestController;
+
+#if SMTG_OS_WINDOWS
+// The window: a plain child window the size of the view. A click turns the gain all the way up.
+class TestView : public CPluginView, public IPlugViewContentScaleSupport
+{
+public:
+    TestView(TestController* owner, const ViewRect& size) : CPluginView(&size), controller(owner) {}
+
+    tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override
+    {
+        return std::strcmp(type, kPlatformTypeHWND) == 0 ? kResultTrue : kResultFalse;
+    }
+
+    tresult PLUGIN_API attached(void* parent, FIDString type) override;
+    tresult PLUGIN_API removed() override;
+
+    tresult PLUGIN_API onSize(ViewRect* newSize) override
+    {
+        CPluginView::onSize(newSize);
+        if (window)
+            MoveWindow(window, 0, 0, newSize->getWidth(), newSize->getHeight(), TRUE);
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API canResize() override { return kResultTrue; }
+
+    tresult PLUGIN_API checkSizeConstraint(ViewRect* size) override
+    {
+        size->right = size->left + std::max<int32>(200, size->getWidth());
+        size->bottom = size->top + std::max<int32>(100, size->getHeight());
+        return kResultTrue;
+    }
+
+    tresult PLUGIN_API setContentScaleFactor(ScaleFactor factor) override;
+
+    // Asks the host for a new width.
+    void requestWidth(int32 width)
+    {
+        if (plugFrame)
+        {
+            ViewRect size(0, 0, width, getRect().getHeight());
+            plugFrame->resizeView(this, &size);
+        }
+    }
+
+    void click();
+
+    DEFINE_INTERFACES
+        DEF_INTERFACE(IPlugViewContentScaleSupport)
+    END_DEFINE_INTERFACES(CPluginView)
+    REFCOUNT_METHODS(CPluginView)
+
+private:
+    static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        if (message == WM_LBUTTONDOWN)
+        {
+            if (auto* view = reinterpret_cast<TestView*>(GetWindowLongPtrW(window, GWLP_USERDATA)))
+                view->click();
+            return 0;
+        }
+
+        return DefWindowProcW(window, message, wParam, lParam);
+    }
+
+    static HINSTANCE module()
+    {
+        HMODULE handle = nullptr;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(&windowProc), &handle);
+        return handle;
+    }
+
+    TestController* controller;
+    HWND window = nullptr;
+};
+#endif
+
+class TestController : public EditControllerEx1
 {
 public:
     static FUnknown* createInstance(void*) { return static_cast<IEditController*>(new TestController()); }
 
     tresult PLUGIN_API initialize(FUnknown* context) override
     {
-        tresult result = EditController::initialize(context);
+        tresult result = EditControllerEx1::initialize(context);
         if (result != kResultOk)
             return result;
+
+        auto* programs = new ProgramList(STR16("Factory"), kProgram, kRootUnitId);
+        for (const Program& program : kPrograms)
+            programs->addProgram(reinterpret_cast<const TChar*>(program.name));
+        addUnit(new Unit(STR16("Root"), kRootUnitId, kNoParentUnitId, kProgram));
+        addProgramList(programs);
 
         parameters.addParameter(new RangeParameter(STR16("Gain"), kGain, STR16("dB"), kMinGainDb, kMaxGainDb, 0));
 
@@ -253,8 +384,42 @@ public:
         parameters.addParameter(STR16("Bypass"), nullptr, 1, 0, ParameterInfo::kCanAutomate | ParameterInfo::kIsBypass, kBypass);
         parameters.addParameter(new RangeParameter(STR16("Hold"), kHold, STR16("samples"), 1, 1 + kHoldSteps, 1, kHoldSteps));
         parameters.addParameter(STR16("Crash"), nullptr, 1, 0, ParameterInfo::kIsHidden, kCrash);
+        parameters.addParameter(programs->getParameter());
+        parameters.addParameter(STR16("Hang"), nullptr, 1, 0, ParameterInfo::kIsHidden, kHang);
+        parameters.addParameter(STR16("Editor Width"), nullptr, 0, 0, ParameterInfo::kIsHidden, kEditorWidth);
+        parameters.addParameter(STR16("Editor Scale"), nullptr, 0, 0, ParameterInfo::kIsHidden | ParameterInfo::kIsReadOnly, kEditorScale);
         return kResultOk;
     }
+
+    IPlugView* PLUGIN_API createView(FIDString name) override
+    {
+#if SMTG_OS_WINDOWS
+        if (std::strcmp(name, ViewType::kEditor) == 0)
+        {
+            view = new TestView(this, ViewRect(0, 0, 400, 300));
+            return view;
+        }
+#endif
+        (void)name;
+        return nullptr;
+    }
+
+#if SMTG_OS_WINDOWS
+    void viewRemoved(TestView* removed)
+    {
+        if (view == removed)
+            view = nullptr;
+    }
+
+    // A click in the window: an edit, as a knob would make it.
+    void edit(ParamID id, ParamValue value)
+    {
+        beginEdit(id);
+        setParamNormalized(id, value);
+        performEdit(id, value);
+        endEdit(id);
+    }
+#endif
 
     tresult PLUGIN_API setComponentState(IBStream* state) override
     {
@@ -288,19 +453,84 @@ public:
         return kResultOk;
     }
 
-    // A new latency takes effect when the host restarts the processor.
+    // A new latency takes effect when the host restarts the processor. A program sets the gain and
+    // the hold, and the host is told to read them again.
     tresult PLUGIN_API setParamNormalized(ParamID tag, ParamValue value) override
     {
         int32 before = stepOf(getParamNormalized(tag), kLatencySteps);
-        tresult result = EditController::setParamNormalized(tag, value);
-        if (tag == kLatency && result == kResultOk && componentHandler && stepOf(getParamNormalized(tag), kLatencySteps) != before)
+        tresult result = EditControllerEx1::setParamNormalized(tag, value);
+        if (result != kResultOk)
+            return result;
+
+        if (tag == kLatency && componentHandler && stepOf(getParamNormalized(tag), kLatencySteps) != before)
             componentHandler->restartComponent(kLatencyChanged);
+
+        if (tag == kProgram)
+        {
+            const Program& program = kPrograms[stepOf(value, kProgramSteps)];
+            EditControllerEx1::setParamNormalized(kGain, gainValue(program.gainDb));
+            EditControllerEx1::setParamNormalized(kHold, holdValue(program.hold));
+            if (componentHandler)
+                componentHandler->restartComponent(kParamValuesChanged);
+        }
+
+#if SMTG_OS_WINDOWS
+        if (tag == kEditorWidth && view)
+            view->requestWidth(200 + static_cast<int32>(value * 400));
+#endif
         return result;
     }
 
 private:
     int32 saves = 0;
+#if SMTG_OS_WINDOWS
+    TestView* view = nullptr;
+#endif
 };
+
+#if SMTG_OS_WINDOWS
+tresult PLUGIN_API TestView::attached(void* parent, FIDString type)
+{
+    static ATOM windowClass = [] {
+        WNDCLASSW description {};
+        description.lpfnWndProc = &TestView::windowProc;
+        description.hInstance = module();
+        description.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        description.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+        description.lpszClassName = L"VoiceChangerTestEditor";
+        return RegisterClassW(&description);
+    }();
+    (void)windowClass;
+
+    tresult result = CPluginView::attached(parent, type);
+    if (result != kResultOk)
+        return result;
+    window = CreateWindowExW(0, L"VoiceChangerTestEditor", L"VoiceChanger Test Effect", WS_CHILD | WS_VISIBLE, 0, 0,
+                             getRect().getWidth(), getRect().getHeight(), static_cast<HWND>(parent), nullptr, module(), nullptr);
+    SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+    return window ? kResultOk : kResultFalse;
+}
+
+tresult PLUGIN_API TestView::removed()
+{
+    if (window)
+        DestroyWindow(window);
+    window = nullptr;
+    controller->viewRemoved(this);
+    return CPluginView::removed();
+}
+
+tresult PLUGIN_API TestView::setContentScaleFactor(ScaleFactor factor)
+{
+    controller->setParamNormalized(kEditorScale, factor / 4);
+    return kResultTrue;
+}
+
+void TestView::click()
+{
+    controller->edit(kGain, 1.0);
+}
+#endif
 
 } // namespace
 

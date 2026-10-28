@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define VC_API_VERSION 1
+#define VC_API_VERSION 2
 
 enum vc_error
 {
@@ -92,6 +92,10 @@ typedef struct vc_param_change
 typedef void (*vc_param_edited_callback)(void* user, unsigned int id, double value);
 typedef void (*vc_restart_callback)(void* user, int flags);
 
+/* The plug-in's window asks to be resized (UI thread). The host resizes its window (which calls
+ * vc_editor_set_size) and returns non-zero, or returns 0 to refuse. */
+typedef int (*vc_resize_callback)(void* user, int width, int height);
+
 typedef struct vc_plugin vc_plugin;
 
 VC_API int vc_api_version(void);
@@ -146,6 +150,56 @@ VC_API int vc_state_get(vc_plugin* plugin, unsigned char* buffer, int capacity);
 VC_API int vc_state_set(vc_plugin* plugin, const unsigned char* data, int length);
 
 VC_API void vc_set_callbacks(vc_plugin* plugin, void* user, vc_param_edited_callback edited, vc_restart_callback restart);
+
+/* ---- Programs and preset files (UI thread) ---- */
+
+/* Programs of the plug-in's program list (its factory presets): how many there are, 0 when none. */
+VC_API int vc_program_count(vc_plugin* plugin);
+VC_API int vc_program_name(vc_plugin* plugin, int index, char* text, int capacity);
+
+/* The id of the parameter that selects a program, or -1. Programs are its steps, in order. */
+VC_API long long vc_program_param(vc_plugin* plugin);
+
+/* Loads or saves a .vstpreset file (both the processor's and the controller's state). */
+VC_API int vc_preset_load(vc_plugin* plugin, const char* path);
+VC_API int vc_preset_save(vc_plugin* plugin, const char* path);
+
+/* ---- The plug-in's own window (UI thread) ---- */
+
+/* Whether the plug-in has an editor for this kind of window ("HWND", "X11EmbedWindowID", "NSView"). */
+VC_API int vc_editor_available(vc_plugin* plugin, const char* platform_type);
+
+/* Shows the editor in parent (a native window of platform_type) and returns its size in pixels and
+ * whether it can be resized. Resize requests arrive through the callback. */
+VC_API int vc_editor_open(vc_plugin* plugin, void* parent, const char* platform_type,
+                          int* width, int* height, int* resizable);
+
+/* The host's window was resized: tells the editor its new size. */
+VC_API int vc_editor_set_size(vc_plugin* plugin, int width, int height);
+
+/* Adjusts a size the user drags to one the editor accepts. */
+VC_API int vc_editor_constrain(vc_plugin* plugin, int* width, int* height);
+
+/* The display's scale factor (1 = 96 dpi), for editors that support it. */
+VC_API int vc_editor_set_scale(vc_plugin* plugin, float scale);
+
+VC_API void vc_editor_close(vc_plugin* plugin);
+
+VC_API void vc_set_resize_callback(vc_plugin* plugin, vc_resize_callback resize);
+
+/* ---- Signals between processes (an out-of-process host's audio handshake) ---- */
+
+typedef struct vc_signal vc_signal;
+
+/* Creates a named signal (a semaphore starting at 0), or returns null if the name is taken. The
+ * name is a plain word of letters and digits. The creator's close removes the name. */
+VC_API vc_signal* vc_signal_create(const char* name);
+VC_API vc_signal* vc_signal_open(const char* name);
+VC_API int vc_signal_post(vc_signal* signal);
+
+/* Waits for a post: returns 1 when posted, 0 on timeout, negative on error. timeout_ms < 0 waits for ever. */
+VC_API int vc_signal_wait(vc_signal* signal, int timeout_ms);
+VC_API void vc_signal_close(vc_signal* signal);
 
 #ifdef __cplusplus
 }

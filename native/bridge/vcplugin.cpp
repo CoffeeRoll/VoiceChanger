@@ -2,12 +2,27 @@
 
 #include "vcplugin.h"
 
+#if defined(_WIN32)
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <cerrno>
+#include <ctime>
+#include <fcntl.h>
+#include <semaphore.h>
+#include <unistd.h>
+#endif
+
 #include "pluginterfaces/base/funknownimpl.h"
 #include "pluginterfaces/base/ibstream.h"
+#include "pluginterfaces/gui/iplugview.h"
+#include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
+#include "pluginterfaces/vst/ivstunits.h"
 #include "pluginterfaces/vst/vstspeaker.h"
 #include "public.sdk/source/common/memorystream.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
@@ -16,10 +31,14 @@
 #include "public.sdk/source/vst/hosting/plugprovider.h"
 #include "public.sdk/source/vst/hosting/processdata.h"
 #include "public.sdk/source/vst/utility/stringconvert.h"
+#include "public.sdk/source/vst/vstpresetfile.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -121,6 +140,17 @@ public:
     }
 };
 
+// The host side of a plug-in's window: passes its resize requests on.
+class PlugFrame : public U::Implements<U::Directly<IPlugFrame>>
+{
+public:
+    explicit PlugFrame(vc_plugin* owner) : plugin(owner) {}
+
+    tresult PLUGIN_API resizeView(IPlugView* view, ViewRect* newSize) override;
+
+    vc_plugin* plugin;
+};
+
 int channelsOf(SpeakerArrangement arrangement)
 {
     return SpeakerArr::getChannelCount(arrangement);
@@ -163,8 +193,15 @@ struct vc_plugin
     IPtr<IAudioProcessor> processor;
     IPtr<IEditController> controller;
     IPtr<ComponentHandler> handler;
+    VST3::UID classId;
     std::string name;
     std::string vendor;
+
+    // The plug-in's window, while it is open.
+    IPtr<IPlugView> view;
+    IPtr<PlugFrame> frame;
+    ViewRect viewSize {};
+    vc_resize_callback resize = nullptr;
 
     HostProcessData data;
     ParameterChanges inputChanges {64};
@@ -196,7 +233,71 @@ struct vc_plugin
     }
 };
 
+tresult PLUGIN_API PlugFrame::resizeView(IPlugView* view, ViewRect* newSize)
+{
+    if (!newSize || !plugin || view != plugin->view)
+        return kInvalidArgument;
+    if (!plugin->resize || !plugin->resize(plugin->handler->user, newSize->getWidth(), newSize->getHeight()))
+        return kResultFalse;
+
+    // The host's window has that size now. When it already had, the editor wasn't told: tell it.
+    if (plugin->viewSize.getWidth() != newSize->getWidth() || plugin->viewSize.getHeight() != newSize->getHeight())
+    {
+        plugin->viewSize = ViewRect(0, 0, newSize->getWidth(), newSize->getHeight());
+        view->onSize(&plugin->viewSize);
+    }
+
+    return kResultTrue;
+}
+
 namespace {
+
+void closeEditor(vc_plugin* plugin)
+{
+    if (!plugin->view)
+        return;
+    plugin->view->removed();
+    plugin->view->setFrame(nullptr);
+    plugin->view = nullptr;
+}
+
+// The program list of the plug-in's root unit (or its first one).
+bool findProgramList(vc_plugin* plugin, IPtr<IUnitInfo>& units, ProgramListInfo& list)
+{
+    if (!plugin->controller)
+        return false;
+    units = U::cast<IUnitInfo>(plugin->controller);
+    if (!units || units->getProgramListCount() <= 0)
+        return false;
+
+    ProgramListID wanted = kNoProgramListId;
+    for (int32 i = 0; i < units->getUnitCount(); i++)
+    {
+        UnitInfo unit {};
+        if (units->getUnitInfo(i, unit) == kResultTrue && unit.id == kRootUnitId)
+        {
+            wanted = unit.programListId;
+            break;
+        }
+    }
+
+    for (int32 i = 0; i < units->getProgramListCount(); i++)
+    {
+        if (units->getProgramListInfo(i, list) == kResultTrue && (wanted == kNoProgramListId || list.id == wanted))
+            return true;
+    }
+
+    return false;
+}
+
+bool readFile(const char* path, std::vector<char>& bytes)
+{
+    std::ifstream file(std::filesystem::u8path(path), std::ios::binary);
+    if (!file)
+        return false;
+    bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    return !file.bad();
+}
 
 void suspend(vc_plugin* plugin)
 {
@@ -332,9 +433,11 @@ VC_API vc_plugin* vc_open(const char* path, const char* class_id)
                 return nullptr;
             }
 
+            plugin->classId = info.ID();
             plugin->name = info.name();
             plugin->vendor = info.vendor().empty() ? factory.info().vendor() : info.vendor();
             plugin->handler = owned(new ComponentHandler());
+            plugin->frame = owned(new PlugFrame(plugin.get()));
             if (plugin->controller)
                 plugin->controller->setComponentHandler(plugin->handler);
             return plugin.release();
@@ -361,6 +464,7 @@ VC_API void vc_close(vc_plugin* plugin)
         return;
     try
     {
+        closeEditor(plugin);
         suspend(plugin);
         if (plugin->controller)
             plugin->controller->setComponentHandler(nullptr);
@@ -819,6 +923,397 @@ VC_API void vc_set_callbacks(vc_plugin* plugin, void* user, vc_param_edited_call
     plugin->handler->user = user;
     plugin->handler->edited = edited;
     plugin->handler->restart = restart;
+}
+
+VC_API int vc_program_count(vc_plugin* plugin)
+{
+    if (!plugin)
+        return 0;
+    try
+    {
+        IPtr<IUnitInfo> units;
+        ProgramListInfo list {};
+        return findProgramList(plugin, units, list) ? std::max<int32>(0, list.programCount) : 0;
+    }
+    catch (...)
+    {
+        return 0;
+    }
+}
+
+VC_API int vc_program_name(vc_plugin* plugin, int index, char* text, int capacity)
+{
+    if (!plugin || !text || capacity < 1)
+        return fail(VC_ERROR_ARGUMENT, "No plug-in or buffer.");
+    text[0] = 0;
+    try
+    {
+        IPtr<IUnitInfo> units;
+        ProgramListInfo list {};
+        String128 name {};
+        if (!findProgramList(plugin, units, list) || index < 0 || index >= list.programCount ||
+            units->getProgramName(list.id, index, name) != kResultTrue)
+            return fail(VC_ERROR_ARGUMENT, "No program " + std::to_string(index));
+        copyText(text, static_cast<size_t>(capacity), utf8(name));
+        return VC_OK;
+    }
+    catch (...)
+    {
+        return fail(VC_ERROR_FAILED, "The plug-in threw an exception.");
+    }
+}
+
+VC_API long long vc_program_param(vc_plugin* plugin)
+{
+    if (!plugin || !plugin->controller)
+        return -1;
+    try
+    {
+        // The root unit's program parameter, or failing that any.
+        long long found = -1;
+        for (int32 i = 0; i < plugin->controller->getParameterCount(); i++)
+        {
+            ParameterInfo info {};
+            if (plugin->controller->getParameterInfo(i, info) != kResultTrue || !(info.flags & ParameterInfo::kIsProgramChange))
+                continue;
+            if (info.unitId == kRootUnitId)
+                return info.id;
+            if (found < 0)
+                found = info.id;
+        }
+
+        return found;
+    }
+    catch (...)
+    {
+        return -1;
+    }
+}
+
+VC_API int vc_preset_load(vc_plugin* plugin, const char* path)
+{
+    if (!plugin || !path)
+        return fail(VC_ERROR_ARGUMENT, "No plug-in or path.");
+    try
+    {
+        std::vector<char> bytes;
+        if (!readFile(path, bytes))
+            return fail(VC_ERROR_FAILED, std::string("The preset could not be read: ") + path);
+        MemoryStream stream(bytes.data(), static_cast<TSize>(bytes.size()));
+        if (!PresetFile::loadPreset(&stream, FUID::fromTUID(plugin->classId.data()), plugin->component, plugin->controller))
+            return fail(VC_ERROR_FAILED, "The preset is not for this plug-in, or the plug-in refused it.");
+        return VC_OK;
+    }
+    catch (...)
+    {
+        return fail(VC_ERROR_FAILED, "The plug-in threw an exception while loading the preset.");
+    }
+}
+
+VC_API int vc_preset_save(vc_plugin* plugin, const char* path)
+{
+    if (!plugin || !path)
+        return fail(VC_ERROR_ARGUMENT, "No plug-in or path.");
+    try
+    {
+        MemoryStream stream;
+        if (!PresetFile::savePreset(&stream, FUID::fromTUID(plugin->classId.data()), plugin->component, plugin->controller))
+            return fail(VC_ERROR_FAILED, "The plug-in could not save its state.");
+        std::ofstream file(std::filesystem::u8path(path), std::ios::binary | std::ios::trunc);
+        file.write(stream.getData(), static_cast<std::streamsize>(stream.getSize()));
+        if (!file)
+            return fail(VC_ERROR_FAILED, std::string("The preset could not be written: ") + path);
+        return VC_OK;
+    }
+    catch (...)
+    {
+        return fail(VC_ERROR_FAILED, "The plug-in threw an exception while saving the preset.");
+    }
+}
+
+VC_API int vc_editor_available(vc_plugin* plugin, const char* platform_type)
+{
+    if (!plugin || !plugin->controller || !platform_type)
+        return 0;
+    try
+    {
+        if (plugin->view)
+            return plugin->view->isPlatformTypeSupported(platform_type) == kResultTrue;
+        IPtr<IPlugView> view = owned(plugin->controller->createView(ViewType::kEditor));
+        return view && view->isPlatformTypeSupported(platform_type) == kResultTrue;
+    }
+    catch (...)
+    {
+        return 0;
+    }
+}
+
+VC_API int vc_editor_open(vc_plugin* plugin, void* parent, const char* platform_type, int* width, int* height, int* resizable)
+{
+    if (!plugin || !plugin->controller || !parent || !platform_type || !width || !height || !resizable)
+        return fail(VC_ERROR_ARGUMENT, "No plug-in or window.");
+    if (plugin->view)
+        return fail(VC_ERROR_FAILED, "The plug-in's window is open already.");
+
+    try
+    {
+        IPtr<IPlugView> view = owned(plugin->controller->createView(ViewType::kEditor));
+        if (!view)
+            return fail(VC_ERROR_FAILED, "The plug-in has no window.");
+        if (view->isPlatformTypeSupported(platform_type) != kResultTrue)
+            return fail(VC_ERROR_FAILED, std::string("The plug-in's window doesn't support ") + platform_type + ".");
+
+        view->setFrame(plugin->frame);
+        if (view->attached(parent, platform_type) != kResultOk)
+        {
+            view->setFrame(nullptr);
+            return fail(VC_ERROR_FAILED, "The plug-in's window could not be shown.");
+        }
+
+        ViewRect size {};
+        view->getSize(&size);
+        plugin->view = view;
+        plugin->viewSize = ViewRect(0, 0, size.getWidth(), size.getHeight());
+        *width = size.getWidth();
+        *height = size.getHeight();
+        *resizable = view->canResize() == kResultTrue;
+        return VC_OK;
+    }
+    catch (...)
+    {
+        return fail(VC_ERROR_FAILED, "The plug-in threw an exception while opening its window.");
+    }
+}
+
+VC_API int vc_editor_set_size(vc_plugin* plugin, int width, int height)
+{
+    if (!plugin || !plugin->view || width < 0 || height < 0)
+        return VC_ERROR_ARGUMENT;
+    if (plugin->viewSize.getWidth() == width && plugin->viewSize.getHeight() == height)
+        return VC_OK;
+    try
+    {
+        plugin->viewSize = ViewRect(0, 0, width, height);
+        return plugin->view->onSize(&plugin->viewSize) == kResultOk ? VC_OK : VC_ERROR_FAILED;
+    }
+    catch (...)
+    {
+        return VC_ERROR_FAILED;
+    }
+}
+
+VC_API int vc_editor_constrain(vc_plugin* plugin, int* width, int* height)
+{
+    if (!plugin || !plugin->view || !width || !height)
+        return VC_ERROR_ARGUMENT;
+    try
+    {
+        ViewRect rect(0, 0, *width, *height);
+        if (plugin->view->checkSizeConstraint(&rect) != kResultTrue)
+            return VC_ERROR_FAILED;
+        *width = rect.getWidth();
+        *height = rect.getHeight();
+        return VC_OK;
+    }
+    catch (...)
+    {
+        return VC_ERROR_FAILED;
+    }
+}
+
+VC_API int vc_editor_set_scale(vc_plugin* plugin, float scale)
+{
+    if (!plugin || !plugin->view || scale <= 0)
+        return VC_ERROR_ARGUMENT;
+    try
+    {
+        auto support = U::cast<IPlugViewContentScaleSupport>(plugin->view);
+        return support && support->setContentScaleFactor(scale) == kResultTrue ? VC_OK : VC_ERROR_FAILED;
+    }
+    catch (...)
+    {
+        return VC_ERROR_FAILED;
+    }
+}
+
+VC_API void vc_editor_close(vc_plugin* plugin)
+{
+    if (!plugin)
+        return;
+    try
+    {
+        closeEditor(plugin);
+    }
+    catch (...)
+    {
+        plugin->view = nullptr;
+    }
+}
+
+VC_API void vc_set_resize_callback(vc_plugin* plugin, vc_resize_callback resize)
+{
+    if (plugin)
+        plugin->resize = resize;
+}
+
+// ---- Signals ----
+
+struct vc_signal
+{
+#if defined(_WIN32)
+    HANDLE handle = nullptr;
+#else
+    sem_t* semaphore = SEM_FAILED;
+    std::string name;
+    bool owner = false;
+#endif
+};
+
+namespace {
+
+bool validSignalName(const char* name)
+{
+    if (!name || !*name || std::strlen(name) > 30)
+        return false;
+    for (const char* c = name; *c; c++)
+    {
+        if (!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == '-' || *c == '_'))
+            return false;
+    }
+    return true;
+}
+
+vc_signal* openSignal(const char* name, bool create)
+{
+    if (!validSignalName(name))
+    {
+        fail(VC_ERROR_ARGUMENT, "Not a signal name.");
+        return nullptr;
+    }
+
+    auto signal = std::make_unique<vc_signal>();
+#if defined(_WIN32)
+    std::string full = std::string("Local\\vc-") + name;
+    if (create)
+    {
+        signal->handle = CreateSemaphoreA(nullptr, 0, 0x7fffffff, full.c_str());
+        if (signal->handle && GetLastError() == ERROR_ALREADY_EXISTS)
+        {
+            CloseHandle(signal->handle);
+            signal->handle = nullptr;
+        }
+    }
+    else
+    {
+        signal->handle = OpenSemaphoreA(SEMAPHORE_MODIFY_STATE | SYNCHRONIZE, FALSE, full.c_str());
+    }
+
+    if (!signal->handle)
+    {
+        fail(VC_ERROR_FAILED, "The signal could not be " + std::string(create ? "created: " : "opened: ") + name);
+        return nullptr;
+    }
+#else
+    signal->name = std::string("/vc-") + name;
+    signal->owner = create;
+    signal->semaphore = create ? sem_open(signal->name.c_str(), O_CREAT | O_EXCL, 0600, 0) : sem_open(signal->name.c_str(), 0);
+    if (signal->semaphore == SEM_FAILED)
+    {
+        fail(VC_ERROR_FAILED, "The signal could not be " + std::string(create ? "created: " : "opened: ") + name + " (" + std::strerror(errno) + ")");
+        return nullptr;
+    }
+#endif
+    return signal.release();
+}
+
+} // namespace
+
+VC_API vc_signal* vc_signal_create(const char* name)
+{
+    return openSignal(name, true);
+}
+
+VC_API vc_signal* vc_signal_open(const char* name)
+{
+    return openSignal(name, false);
+}
+
+VC_API int vc_signal_post(vc_signal* signal)
+{
+    if (!signal)
+        return VC_ERROR_ARGUMENT;
+#if defined(_WIN32)
+    return ReleaseSemaphore(signal->handle, 1, nullptr) ? VC_OK : VC_ERROR_FAILED;
+#else
+    return sem_post(signal->semaphore) == 0 ? VC_OK : VC_ERROR_FAILED;
+#endif
+}
+
+VC_API int vc_signal_wait(vc_signal* signal, int timeout_ms)
+{
+    if (!signal)
+        return VC_ERROR_ARGUMENT;
+#if defined(_WIN32)
+    DWORD result = WaitForSingleObject(signal->handle, timeout_ms < 0 ? INFINITE : static_cast<DWORD>(timeout_ms));
+    return result == WAIT_OBJECT_0 ? 1 : result == WAIT_TIMEOUT ? 0 : VC_ERROR_FAILED;
+#else
+    if (timeout_ms < 0)
+    {
+        while (sem_wait(signal->semaphore) != 0)
+        {
+            if (errno != EINTR)
+                return VC_ERROR_FAILED;
+        }
+        return 1;
+    }
+
+#if defined(__APPLE__)
+    // No sem_timedwait on macOS: poll.
+    for (int waited = 0;; waited++)
+    {
+        if (sem_trywait(signal->semaphore) == 0)
+            return 1;
+        if (errno != EAGAIN && errno != EINTR)
+            return VC_ERROR_FAILED;
+        if (waited >= timeout_ms * 10)
+            return 0;
+        usleep(100);
+    }
+#else
+    timespec deadline {};
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += timeout_ms / 1000;
+    deadline.tv_nsec += static_cast<long>(timeout_ms % 1000) * 1000000L;
+    if (deadline.tv_nsec >= 1000000000L)
+    {
+        deadline.tv_sec++;
+        deadline.tv_nsec -= 1000000000L;
+    }
+
+    while (sem_timedwait(signal->semaphore, &deadline) != 0)
+    {
+        if (errno == ETIMEDOUT)
+            return 0;
+        if (errno != EINTR)
+            return VC_ERROR_FAILED;
+    }
+    return 1;
+#endif
+#endif
+}
+
+VC_API void vc_signal_close(vc_signal* signal)
+{
+    if (!signal)
+        return;
+#if defined(_WIN32)
+    CloseHandle(signal->handle);
+#else
+    sem_close(signal->semaphore);
+    if (signal->owner)
+        sem_unlink(signal->name.c_str());
+#endif
+    delete signal;
 }
 
 } // extern "C"

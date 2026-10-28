@@ -162,7 +162,7 @@ public sealed class PluginCatalog(string cachePath)
     /// Adds the effects not registered yet to <paramref name="registry"/> (so they also become
     /// nodes). Returns the ones added.
     /// </summary>
-    public IReadOnlyList<EffectDescriptor> RegisterInto(EffectRegistry registry)
+    public IReadOnlyList<EffectDescriptor> RegisterInto(EffectRegistry registry, PluginHosting? hosting = null, Action<PluginEffect>? created = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         var added = new List<EffectDescriptor>();
@@ -173,7 +173,7 @@ public sealed class PluginCatalog(string cachePath)
                 continue;
             }
 
-            var descriptor = Describe(plugin);
+            var descriptor = Describe(plugin, hosting, created);
             registry.Register(descriptor);
             added.Add(descriptor);
         }
@@ -181,12 +181,26 @@ public sealed class PluginCatalog(string cachePath)
         return added;
     }
 
-    /// <summary>How a plug-in appears in the effect and node lists.</summary>
-    public static EffectDescriptor Describe(PluginInfo plugin)
+    /// <summary>
+    /// How a plug-in appears in the effect and node lists: it runs as <paramref name="hosting"/> says,
+    /// and <paramref name="created"/> hears of each effect made.
+    /// </summary>
+    public static EffectDescriptor Describe(PluginInfo plugin, PluginHosting? hosting = null, Action<PluginEffect>? created = null)
     {
         ArgumentNullException.ThrowIfNull(plugin);
         string vendor = string.IsNullOrWhiteSpace(plugin.Vendor) ? "an unknown vendor" : plugin.Vendor;
-        return new EffectDescriptor(plugin.TypeId, plugin.Name, $"VST3 plug-in by {vendor}.", () => PluginEffect.Create(plugin))
+        AudioEffect Create()
+        {
+            var effect = PluginEffect.Create(plugin, hosting);
+            if (effect is PluginEffect loaded)
+            {
+                created?.Invoke(loaded);
+            }
+
+            return effect;
+        }
+
+        return new EffectDescriptor(plugin.TypeId, plugin.Name, $"VST3 plug-in by {vendor}.", Create)
         {
             Group = string.IsNullOrWhiteSpace(plugin.Vendor) ? "Plug-ins" : plugin.Vendor,
         };

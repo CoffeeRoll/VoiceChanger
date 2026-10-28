@@ -9,7 +9,7 @@ internal static unsafe partial class VcPlugin
     public const string Library = "vcplugin";
 
     /// <summary>The API version these declarations are written against.</summary>
-    public const int ApiVersion = 1;
+    public const int ApiVersion = 2;
 
     public const int Ok = 0;
     public const int ErrorFailed = -1;
@@ -84,6 +84,57 @@ internal static unsafe partial class VcPlugin
         nint user,
         delegate* unmanaged<nint, uint, double, void> edited,
         delegate* unmanaged<nint, int, void> restart);
+
+    [LibraryImport(Library, EntryPoint = "vc_program_count")]
+    public static partial int GetProgramCount(PluginHandle plugin);
+
+    [LibraryImport(Library, EntryPoint = "vc_program_name")]
+    public static partial int GetProgramName(PluginHandle plugin, int index, byte* text, int capacity);
+
+    [LibraryImport(Library, EntryPoint = "vc_program_param")]
+    public static partial long GetProgramParam(PluginHandle plugin);
+
+    [LibraryImport(Library, EntryPoint = "vc_preset_load", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int LoadPreset(PluginHandle plugin, string path);
+
+    [LibraryImport(Library, EntryPoint = "vc_preset_save", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int SavePreset(PluginHandle plugin, string path);
+
+    [LibraryImport(Library, EntryPoint = "vc_editor_available", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int IsEditorAvailable(PluginHandle plugin, string platformType);
+
+    [LibraryImport(Library, EntryPoint = "vc_editor_open", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int OpenEditor(PluginHandle plugin, nint parent, string platformType, out int width, out int height, out int resizable);
+
+    [LibraryImport(Library, EntryPoint = "vc_editor_set_size")]
+    public static partial int SetEditorSize(PluginHandle plugin, int width, int height);
+
+    [LibraryImport(Library, EntryPoint = "vc_editor_constrain")]
+    public static partial int ConstrainEditor(PluginHandle plugin, ref int width, ref int height);
+
+    [LibraryImport(Library, EntryPoint = "vc_editor_set_scale")]
+    public static partial int SetEditorScale(PluginHandle plugin, float scale);
+
+    [LibraryImport(Library, EntryPoint = "vc_editor_close")]
+    public static partial void CloseEditor(PluginHandle plugin);
+
+    [LibraryImport(Library, EntryPoint = "vc_set_resize_callback")]
+    public static partial void SetResizeCallback(PluginHandle plugin, delegate* unmanaged<nint, int, int, int> resize);
+
+    [LibraryImport(Library, EntryPoint = "vc_signal_create", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial nint CreateSignal(string name);
+
+    [LibraryImport(Library, EntryPoint = "vc_signal_open", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial nint OpenSignal(string name);
+
+    [LibraryImport(Library, EntryPoint = "vc_signal_post")]
+    public static partial int PostSignal(nint signal);
+
+    [LibraryImport(Library, EntryPoint = "vc_signal_wait")]
+    public static partial int WaitSignal(nint signal, int timeoutMilliseconds);
+
+    [LibraryImport(Library, EntryPoint = "vc_signal_close")]
+    public static partial void CloseSignal(nint signal);
 
     /// <summary>Why the last call on this thread failed.</summary>
     public static string LastError => Text(GetLastError(), int.MaxValue);
@@ -217,7 +268,11 @@ internal sealed class PluginHandle : SafeHandle
     /// Sends the plug-in's callbacks to <paramref name="target"/>, which receives them as the
     /// <c>user</c> argument (a weak handle: the plug-in doesn't keep its effect alive).
     /// </summary>
-    public unsafe void SetCallbacks(object target, delegate* unmanaged<nint, uint, double, void> edited, delegate* unmanaged<nint, int, void> restart)
+    public unsafe void SetCallbacks(
+        object target,
+        delegate* unmanaged<nint, uint, double, void> edited,
+        delegate* unmanaged<nint, int, void> restart,
+        delegate* unmanaged<nint, int, int, int> resize)
     {
         if (!_callbackTarget.IsAllocated)
         {
@@ -225,6 +280,7 @@ internal sealed class PluginHandle : SafeHandle
         }
 
         VcPlugin.SetCallbacks(this, GCHandle.ToIntPtr(_callbackTarget), edited, restart);
+        VcPlugin.SetResizeCallback(this, resize);
     }
 
     protected override bool ReleaseHandle()

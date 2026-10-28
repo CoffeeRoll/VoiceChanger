@@ -17,6 +17,10 @@ internal static class TestPlugin
     public const uint Bypass = 3;
     public const uint Hold = 4;
     public const uint Crash = 5;
+    public const uint Program = 6;
+    public const uint Hang = 7;
+    public const uint EditorWidth = 8;
+    public const uint EditorScale = 9;
 
     private static readonly Lazy<(PluginInfo? Info, string? Problem)> Found = new(Find);
 
@@ -43,7 +47,7 @@ internal static class TestPlugin
         return null!;
     }
 
-    public static PluginEffect Open() => PluginEffect.Open(Require());
+    public static PluginEffect Open(PluginHosting? hosting = null) => PluginEffect.Open(Require(), hosting);
 
     /// <summary>A gain in dB as the plug-in's normalised value.</summary>
     public static double GainValue(double decibels) => (decibels + 24) / 36;

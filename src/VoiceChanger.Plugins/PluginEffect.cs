@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Runtime.InteropServices;
 using VoiceChanger.Core.Effects;
+using VoiceChanger.Plugins.Hosting;
 using VoiceChanger.Plugins.Native;
 
 namespace VoiceChanger.Plugins;
@@ -10,20 +10,26 @@ namespace VoiceChanger.Plugins;
 public sealed class PluginException(string message) : Exception(message);
 
 /// <summary>
-/// A VST3 effect running inside VoiceChanger, through the native bridge.
+/// A VST3 effect running inside VoiceChanger, in this process or in a host process of its own.
 /// <para>
 /// Each plug-in parameter the user may change becomes an <see cref="EffectParameter"/>: continuous
 /// from 0 to 1, a choice for a list, a toggle or a whole number for stepped ones, all shown with the
 /// plug-in's own text. A change is sent to the plug-in's controller right away and queued for its
-/// processor, which gets it at the start of the next block.
+/// processor, which gets it at the start of the next block. The plug-in's programs and preset files
+/// are its presets.
 /// </para>
 /// <para>
 /// Threading: <see cref="AudioEffect.Process"/> runs on the audio thread; everything else on the UI
 /// thread. Setting the plug-in up again (for a new latency, say) briefly passes the audio through
 /// unprocessed instead of waiting for the audio thread.
 /// </para>
+/// <para>
+/// A plug-in in a host process that crashes or hangs is started again, with its last saved state and
+/// the current parameter values; after <see cref="MaxRestarts"/> crashes within a minute it is given
+/// up (<see cref="Crashed"/>), like one in this process that crashes.
+/// </para>
 /// </summary>
-public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
+public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable, IPluginEvents
 {
     /// <summary>Plug-in effect types are this prefix followed by the class id.</summary>
     public const string TypePrefix = "vst3:";
@@ -31,69 +37,52 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
     /// <summary>Largest block the plug-in is set up for; longer blocks are split.</summary>
     public const int MaxBlockFrames = EffectChain.MaxBlockFrames;
 
-    /// <summary>Lists with more entries than this are shown as a number rather than a choice.</summary>
-    private const int MaxChoices = 64;
+    /// <summary>Restarts of a crashed host process within <see cref="RestartWindow"/> before the plug-in is given up.</summary>
+    public const int MaxRestarts = 3;
 
-    private const int InputRegion = 0;
-    private const int SidechainRegion = 1;
-    private const int OutputRegion = 2;
+    private static readonly TimeSpan RestartWindow = TimeSpan.FromMinutes(1);
 
-    private readonly PluginHandle _handle;
+    private readonly PluginHosting _hosting;
 
     // Held by the audio thread while it processes and by the UI thread while it sets the plug-in up,
     // never waited for on the audio thread.
     private readonly object _gate = new();
     private readonly Binding[] _bindings;
     private readonly Dictionary<uint, Binding> _bindingsById = [];
+    private readonly Dictionary<EffectPreset, PresetSource> _presetSources = [];
     private readonly SynchronizationContext? _context;
+    private readonly List<DateTime> _restarts = [];
 
-    // Pinned: the channels of the input, side-chain and output (two each, mono uses the first), the
-    // pointers to them the bridge reads, and the parameter changes for the next block.
-    private readonly float[] _audio = GC.AllocateArray<float>(3 * 2 * MaxBlockFrames, pinned: true);
-    private readonly nint[] _channels = GC.AllocateArray<nint>(3 * 2, pinned: true);
-    private readonly ParamChange[] _changes;
-
+    private IPluginInstance _plugin;
+    private byte[]? _lastState;
     private float[]? _sidechain;
     private int _pendingChanges;
     private int _restartFlags;
     private volatile int _latency;
     private volatile bool _active;
     private volatile bool _crashed;
+    private volatile bool _dead;
+    private bool _disposed;
     private Origin _origin;
+    private EffectPreset? _appliedPreset;
+    private Dictionary<uint, float>? _presetValues;
 
-    private protected unsafe PluginEffect(PluginInfo info, PluginHandle handle, in PluginInfoNative native)
+    private protected PluginEffect(PluginInfo info, IPluginInstance plugin, PluginHosting hosting)
         : base(info.TypeId, info.Name)
     {
         Info = info;
-        _handle = handle;
+        _plugin = plugin;
+        _hosting = hosting;
         _context = SynchronizationContext.Current;
 
-        fixed (byte* inputName = native.InputName)
-        {
-            string name = VcPlugin.Text(inputName, 64);
-            InputName = string.IsNullOrWhiteSpace(name) ? "Audio" : name;
-        }
-
-        fixed (byte* sidechainName = native.SidechainName)
-        {
-            string name = VcPlugin.Text(sidechainName, 64);
-            SidechainName = string.IsNullOrWhiteSpace(name) ? "Side-chain" : name;
-        }
-
-        fixed (float* audio = _audio)
-        {
-            for (int i = 0; i < _channels.Length; i++)
-            {
-                _channels[i] = (nint)(audio + i * MaxBlockFrames);
-            }
-        }
+        var description = plugin.Description;
+        InputName = string.IsNullOrWhiteSpace(description.InputName) ? "Audio" : description.InputName;
+        SidechainName = string.IsNullOrWhiteSpace(description.SidechainName) ? "Side-chain" : description.SidechainName;
 
         var bindings = new List<Binding>();
-        int count = VcPlugin.GetParamCount(handle);
-        for (int index = 0; index < count; index++)
+        foreach (var parameter in description.Parameters)
         {
-            ParamInfo parameter;
-            if (VcPlugin.DescribeParam(handle, index, &parameter) != VcPlugin.Ok || _bindingsById.ContainsKey(parameter.Id))
+            if (_bindingsById.ContainsKey(parameter.Id))
             {
                 continue;
             }
@@ -111,8 +100,9 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         }
 
         _bindings = [.. bindings];
-        _changes = GC.AllocateArray<ParamChange>(Math.Max(1, _bindings.Length), pinned: true);
-        handle.SetCallbacks(this, &OnEditedCallback, &OnRestartCallback);
+        AddPresets(description, hosting.PresetFolders);
+        plugin.Events = this;
+        _lastState = plugin.GetState();
     }
 
     /// <summary>Where a parameter change comes from, so it isn't sent back where it came from.</summary>
@@ -128,6 +118,12 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         State,
     }
 
+    /// <summary>The plug-in crashed (or kept crashing) and was given up; it passes audio through now. UI thread.</summary>
+    public event EventHandler? Crashed;
+
+    /// <summary><see cref="Problem"/>, <see cref="HasCrashed"/> or <see cref="IsEditorOpen"/> changed. UI thread.</summary>
+    public event EventHandler? StatusChanged;
+
     public PluginInfo Info { get; }
 
     /// <summary>Name of the plug-in's main input.</summary>
@@ -136,13 +132,24 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
     /// <summary>Name of the plug-in's side-chain input (when it has one).</summary>
     public string SidechainName { get; }
 
-    /// <summary>Whether the plug-in crashed; it then passes audio through until it is loaded again.</summary>
+    /// <summary>Whether the plug-in was given up after crashing; it passes audio through.</summary>
     public bool HasCrashed => _crashed;
 
     /// <summary>Why the plug-in isn't processing, or <c>null</c> while it is.</summary>
     public string? Problem { get; private set; }
 
+    /// <summary>Whether it runs in a host process of its own.</summary>
+    public bool RunsInSeparateProcess => _plugin is not LocalPlugin;
+
+    /// <summary>Whether the plug-in has a window of its own to open.</summary>
+    public bool HasEditor => _plugin.Description.HasEditor && !_crashed;
+
+    public bool IsEditorOpen => _plugin.IsEditorOpen;
+
     public override int LatencyFrames => _active ? _latency : 0;
+
+    /// <summary>The loaded plug-in (for the tests).</summary>
+    internal IPluginInstance Instance => _plugin;
 
     /// <summary>Whether the native bridge is there to load plug-ins with, and why not when it isn't.</summary>
     public static bool IsBridgeAvailable(out string? problem) => VcPlugin.IsAvailable(out problem);
@@ -152,29 +159,27 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
     /// node gets a second input.
     /// </summary>
     /// <exception cref="PluginException">The bridge or the plug-in could not be loaded.</exception>
-    public static unsafe PluginEffect Open(PluginInfo info)
+    public static PluginEffect Open(PluginInfo info, PluginHosting? hosting = null)
     {
         ArgumentNullException.ThrowIfNull(info);
-        if (!VcPlugin.IsAvailable(out string? problem))
-        {
-            throw new PluginException(problem!);
-        }
-
-        var handle = PluginHandle.Open(info.Path, info.ClassId, out string? error)
-            ?? throw new PluginException($"{info.Name} could not be loaded: {error}");
+        hosting ??= PluginHosting.InProcess;
+        IPluginInstance plugin;
         try
         {
-            PluginInfoNative native;
-            if (VcPlugin.GetInfo(handle, &native) != VcPlugin.Ok)
-            {
-                throw new PluginException($"{info.Name} could not be loaded: {VcPlugin.LastError}");
-            }
+            plugin = hosting.Start(info);
+        }
+        catch (PluginException ex)
+        {
+            throw new PluginException($"{info.Name} could not be loaded: {ex.Message}");
+        }
 
-            return native.HasSidechain != 0 ? new SidechainPluginEffect(info, handle, native) : new PluginEffect(info, handle, native);
+        try
+        {
+            return plugin.Description.HasSidechain ? new SidechainPluginEffect(info, plugin, hosting) : new PluginEffect(info, plugin, hosting);
         }
         catch
         {
-            handle.Dispose();
+            plugin.Dispose();
             throw;
         }
     }
@@ -183,11 +188,11 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
     /// Loads a plug-in, or returns a <see cref="MissingEffect"/> named after it when it doesn't load
     /// (so a saved one keeps its settings).
     /// </summary>
-    public static AudioEffect Create(PluginInfo info)
+    public static AudioEffect Create(PluginInfo info, PluginHosting? hosting = null)
     {
         try
         {
-            return Open(info);
+            return Open(info, hosting);
         }
         catch (PluginException ex)
         {
@@ -196,69 +201,122 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         }
     }
 
-    public unsafe byte[]? SaveState()
+    public byte[]? SaveState()
     {
-        if (_handle.IsClosed)
+        if (!IsUsable)
         {
-            return null;
+            return _lastState;
         }
 
         DeliverChanges();
-        int size = VcPlugin.GetState(_handle, null, 0);
-        for (int attempt = 0; attempt < 3 && size >= 0; attempt++)
+        var state = _plugin.GetState();
+        if (state is null)
         {
-            var state = new byte[size];
-            fixed (byte* buffer = state)
-            {
-                int written = VcPlugin.GetState(_handle, buffer, state.Length);
-                if (written == state.Length)
-                {
-                    return state;
-                }
-
-                // The state grew between asking for its size and writing it: ask again.
-                size = written;
-            }
+            Trace.WriteLine($"{Name} could not save its state.");
+            return _lastState;
         }
 
-        Trace.WriteLine($"{Name} could not save its state: {VcPlugin.LastError}");
-        return null;
+        _lastState = state;
+        return state;
     }
 
-    public unsafe bool LoadState(byte[] state)
+    public bool LoadState(byte[] state)
     {
         ArgumentNullException.ThrowIfNull(state);
-        if (_handle.IsClosed)
+        if (!IsUsable)
         {
             return false;
         }
 
-        int result;
+        string? error;
         lock (_gate)
         {
-            fixed (byte* data = state)
-            {
-                result = VcPlugin.SetState(_handle, data, state.Length);
-            }
-
-            // The state wins over edits that haven't reached the processor yet.
-            foreach (var binding in _bindings)
-            {
-                Volatile.Write(ref binding.Dirty, 0);
-            }
-
-            Volatile.Write(ref _pendingChanges, 0);
+            error = _plugin.SetState(state);
+            DropQueuedChanges();
         }
 
-        if (result != VcPlugin.Ok)
+        if (error is not null)
         {
-            Trace.WriteLine($"{Name} did not accept its saved state: {VcPlugin.LastError}");
+            Trace.WriteLine($"{Name} did not accept its saved state: {error}");
             return false;
         }
 
+        _lastState = state;
+        _appliedPreset = null;
         ReadParameters();
         HandleRestart();
         return true;
+    }
+
+    /// <summary>Saves the plug-in's settings as a .vstpreset file. Returns null, or why it failed.</summary>
+    public string? SavePreset(string path)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        if (!IsUsable)
+        {
+            return Problem ?? "The plug-in isn't running.";
+        }
+
+        DeliverChanges();
+        return _plugin.SavePreset(path);
+    }
+
+    public override void ApplyPreset(EffectPreset preset)
+    {
+        ArgumentNullException.ThrowIfNull(preset);
+        if (!_presetSources.TryGetValue(preset, out var source))
+        {
+            base.ApplyPreset(preset);
+            return;
+        }
+
+        if (!IsUsable)
+        {
+            return;
+        }
+
+        string? error = source.Path is { } path ? LoadPresetFile(path) : SelectProgram(source.Program, source.Value);
+        if (error is not null)
+        {
+            Trace.WriteLine($"{Name} could not load the preset {preset.Name}: {error}");
+            return;
+        }
+
+        _appliedPreset = preset;
+        _presetValues = _bindings.Where(b => b.IsVisible).ToDictionary(b => b.Id, b => b.Parameter.Value);
+    }
+
+    /// <summary>The plug-in preset last applied, while no setting changed since.</summary>
+    public override EffectPreset? FindMatchingPreset()
+    {
+        if (_appliedPreset is not null && _presetValues is not null &&
+            _bindings.Where(b => b.IsVisible).All(b => _presetValues.TryGetValue(b.Id, out float value) && value.Equals(b.Parameter.Value)))
+        {
+            return _appliedPreset;
+        }
+
+        return null;
+    }
+
+    /// <summary>Opens the plug-in's window, owned by <paramref name="owner"/> (a native window, or 0). Returns null, or why it failed.</summary>
+    public string? OpenEditor(nint owner)
+    {
+        if (!HasEditor || !IsUsable)
+        {
+            return Problem ?? "The plug-in has no window.";
+        }
+
+        string? error = _plugin.OpenEditor(owner, Name);
+        StatusChanged?.Invoke(this, EventArgs.Empty);
+        return error;
+    }
+
+    public void CloseEditor()
+    {
+        if (_plugin.IsEditorOpen)
+        {
+            _plugin.CloseEditor();
+        }
     }
 
     /// <summary>Unloads the plug-in. Only while it is not processed (like <see cref="AudioEffect.Prepare"/>).</summary>
@@ -267,10 +325,48 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         lock (_gate)
         {
             _active = false;
-            _handle.Dispose();
+            _disposed = true;
+            _plugin.Dispose();
         }
 
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>The side-chain for the next block (see <see cref="ISidechainEffect.SetSidechain"/>).</summary>
+    public void SetSidechain(float[]? samples) => _sidechain = samples;
+
+    void IPluginEvents.Edited(uint id, double value)
+    {
+        if (!_bindingsById.TryGetValue(id, out var binding))
+        {
+            return;
+        }
+
+        Queue(binding, value);
+        Show(Origin.Editor, () => binding.Parameter.Value = binding.FromNormalized(value));
+    }
+
+    void IPluginEvents.RestartRequested(RestartFlags flags)
+    {
+        Interlocked.Or(ref _restartFlags, (int)flags);
+
+        // Requests made during VoiceChanger's own calls are handled when those return; others
+        // (from the plug-in's window, say) once the UI thread is free.
+        _context?.Post(static state => ((PluginEffect)state!).HandleRestart(), this);
+    }
+
+    void IPluginEvents.EditorClosed() => StatusChanged?.Invoke(this, EventArgs.Empty);
+
+    void IPluginEvents.Died(string reason)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _dead = true;
+        Trace.WriteLine($"{Name}: {reason}");
+        _context?.Post(static state => ((PluginEffect)state!).Recover(), this);
     }
 
     /// <summary>Sets a plug-in parameter by its id, also one that isn't shown (UI thread).</summary>
@@ -288,18 +384,18 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         }
 
         Queue(binding, value);
-        VcPlugin.SetParam(_handle, id, value);
+        _plugin.SetParam(id, value);
         HandleRestart();
     }
 
-    /// <summary>The side-chain for the next block (see <see cref="ISidechainEffect.SetSidechain"/>).</summary>
-    public void SetSidechain(float[]? samples) => _sidechain = samples;
+    /// <summary>A plug-in parameter's current value as the plug-in has it (UI thread).</summary>
+    internal double GetNormalized(uint id) => _plugin.GetParam(id);
 
     /// <summary>Acts on restart requests the plug-in made (UI thread). Also runs on its own after each request.</summary>
     internal void HandleRestart()
     {
         var flags = (RestartFlags)Interlocked.Exchange(ref _restartFlags, 0);
-        if (flags == RestartFlags.None || _handle.IsClosed)
+        if (flags == RestartFlags.None || !IsUsable)
         {
             return;
         }
@@ -320,6 +416,76 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         }
     }
 
+    /// <summary>
+    /// After its host process died: starts the plug-in again with its last state and the current
+    /// values, or gives it up when it keeps crashing. UI thread; runs on its own after a crash.
+    /// Returns whether the plug-in runs again.
+    /// </summary>
+    internal bool Recover()
+    {
+        if (!_dead || _disposed || _crashed)
+        {
+            return false;
+        }
+
+        IPluginInstance old;
+        lock (_gate)
+        {
+            _active = false;
+            old = _plugin;
+        }
+
+        old.Dispose();
+        var now = DateTime.UtcNow;
+        _restarts.RemoveAll(time => now - time > RestartWindow);
+        if (_restarts.Count >= MaxRestarts)
+        {
+            GiveUp("The plug-in kept crashing and was stopped.");
+            return false;
+        }
+
+        _restarts.Add(now);
+        IPluginInstance plugin;
+        try
+        {
+            plugin = _hosting.Start(Info);
+        }
+        catch (PluginException ex)
+        {
+            GiveUp($"The plug-in could not be started again: {ex.Message}");
+            return false;
+        }
+
+        // Its settings: the last saved state, then the values set since.
+        plugin.Events = this;
+        if (_lastState is not null)
+        {
+            plugin.SetState(_lastState);
+        }
+
+        foreach (var binding in _bindings.Where(b => b.IsVisible))
+        {
+            double value = binding.ToNormalized(binding.Parameter.Value);
+            plugin.SetParam(binding.Id, value);
+            Queue(binding, value);
+        }
+
+        lock (_gate)
+        {
+            _plugin = plugin;
+            _dead = false;
+            Problem = null;
+            if (IsPrepared)
+            {
+                Setup();
+            }
+        }
+
+        Interlocked.Exchange(ref _restartFlags, 0);
+        StatusChanged?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
     protected override void OnPrepare()
     {
         lock (_gate)
@@ -335,7 +501,7 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
 
     protected override void OnReset()
     {
-        if (!_active || _crashed || !Monitor.TryEnter(_gate))
+        if (!_active || _crashed || _dead || !Monitor.TryEnter(_gate))
         {
             return;
         }
@@ -344,7 +510,7 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         {
             if (_active)
             {
-                VcPlugin.Reset(_handle);
+                _plugin.Reset();
             }
         }
         finally
@@ -355,8 +521,8 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
 
     protected override unsafe void ProcessCore(Span<float> interleaved)
     {
-        // Not set up, crashed, or being set up again: the audio passes through.
-        if (!_active || _crashed || !Monitor.TryEnter(_gate))
+        // Not set up, crashed, restarting, or being set up again: the audio passes through.
+        if (!_active || _crashed || _dead || !Monitor.TryEnter(_gate))
         {
             return;
         }
@@ -368,6 +534,7 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
                 return;
             }
 
+            var buffers = _plugin.Buffers;
             int channels = Channels;
             int totalFrames = interleaved.Length / channels;
             float[]? sidechain = _sidechain;
@@ -376,39 +543,29 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
                 sidechain = null;
             }
 
-            fixed (nint* pointers = _channels)
-            fixed (ParamChange* changes = _changes)
+            for (int start = 0; start < totalFrames; start += MaxBlockFrames)
             {
-                for (int start = 0; start < totalFrames; start += MaxBlockFrames)
+                int frames = Math.Min(MaxBlockFrames, totalFrames - start);
+                var block = interleaved.Slice(start * channels, frames * channels);
+                Deinterleave(block, buffers, PluginBuffers.Input, channels);
+                if (sidechain is not null)
                 {
-                    int frames = Math.Min(MaxBlockFrames, totalFrames - start);
-                    var block = interleaved.Slice(start * channels, frames * channels);
-                    Deinterleave(block, InputRegion, channels);
-                    if (sidechain is not null)
-                    {
-                        Deinterleave(sidechain.AsSpan(start * channels, frames * channels), SidechainRegion, channels);
-                    }
+                    Deinterleave(sidechain.AsSpan(start * channels, frames * channels), buffers, PluginBuffers.Sidechain, channels);
+                }
 
-                    int count = CollectChanges();
-                    int result = VcPlugin.Process(
-                        _handle,
-                        (float**)(pointers + (InputRegion * 2)),
-                        sidechain is null ? null : (float**)(pointers + (SidechainRegion * 2)),
-                        (float**)(pointers + (OutputRegion * 2)),
-                        frames,
-                        changes,
-                        count);
-                    if (result == VcPlugin.ErrorCrashed)
-                    {
-                        _crashed = true;
-                        Problem = "The plug-in stopped working.";
-                        return;
-                    }
+                int result = _plugin.Process(frames, sidechain is not null, CollectChanges(buffers));
+                if (result == VcPlugin.ErrorCrashed)
+                {
+                    // In this process: whatever it broke may still be broken. Give it up.
+                    _crashed = true;
+                    Problem = "The plug-in crashed and was stopped.";
+                    _context?.Post(static state => ((PluginEffect)state!).OnCrashed(), this);
+                    return;
+                }
 
-                    if (result == VcPlugin.Ok)
-                    {
-                        Interleave(block, channels);
-                    }
+                if (result == VcPlugin.Ok)
+                {
+                    Interleave(block, buffers, channels);
                 }
             }
         }
@@ -418,61 +575,41 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         }
     }
 
-    [UnmanagedCallersOnly]
-    private static void OnEditedCallback(nint user, uint id, double value)
+    private bool IsUsable => !_disposed && !_crashed && !_dead;
+
+    private static void Deinterleave(ReadOnlySpan<float> interleaved, PluginBuffers buffers, int region, int channels)
     {
-        try
+        int frames = interleaved.Length / channels;
+        for (int channel = 0; channel < channels; channel++)
         {
-            if (GCHandle.FromIntPtr(user).Target is PluginEffect effect)
+            var target = buffers.Span(region, channel, frames);
+            for (int frame = 0, i = channel; frame < frames; frame++, i += channels)
             {
-                effect.OnEdited(id, value);
+                target[frame] = interleaved[i];
             }
-        }
-        catch (Exception ex)
-        {
-            Trace.WriteLine($"Plug-in parameter edit failed: {ex}");
         }
     }
 
-    [UnmanagedCallersOnly]
-    private static void OnRestartCallback(nint user, int flags)
+    private static void Interleave(Span<float> interleaved, PluginBuffers buffers, int channels)
     {
-        try
+        int frames = interleaved.Length / channels;
+        for (int channel = 0; channel < channels; channel++)
         {
-            if (GCHandle.FromIntPtr(user).Target is PluginEffect effect)
+            var source = buffers.Span(PluginBuffers.Output, channel, frames);
+            for (int frame = 0, i = channel; frame < frames; frame++, i += channels)
             {
-                effect.RequestRestart((RestartFlags)flags);
+                interleaved[i] = source[frame];
             }
-        }
-        catch (Exception ex)
-        {
-            Trace.WriteLine($"Plug-in restart request failed: {ex}");
         }
     }
 
-    private unsafe Binding CreateBinding(in ParamInfo info)
+    private Binding CreateBinding(PluginParameterInfo info)
     {
-        string title;
-        string units;
-        fixed (byte* text = info.Title)
-        {
-            title = VcPlugin.Text(text, 128);
-        }
-
-        fixed (byte* text = info.Units)
-        {
-            units = VcPlugin.Text(text, 32);
-        }
-
         uint id = info.Id;
-        int steps = Math.Max(0, info.StepCount);
+        int steps = info.StepCount;
         string key = id.ToString(CultureInfo.InvariantCulture);
-        if (string.IsNullOrWhiteSpace(title))
-        {
-            title = "Parameter " + key;
-        }
-
-        bool isList = (info.Flags & ParamFlags.List) != 0;
+        string title = string.IsNullOrWhiteSpace(info.Title) ? "Parameter " + key : info.Title;
+        string units = info.Units;
         var hidden = ParamFlags.Hidden | ParamFlags.ReadOnly | ParamFlags.Bypass | ParamFlags.ProgramChange;
         bool visible = (info.Flags & hidden) == 0;
         int defaultStep = Binding.StepOf(info.DefaultValue, steps);
@@ -482,9 +619,8 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         {
             parameter = EffectParameter.Continuous(key, title, 0, 1, (float)info.DefaultValue, units, decimals: 6, formatter: v => Format(id, v, units));
         }
-        else if (isList && steps < MaxChoices)
+        else if (info.Choices is { Count: >= 2 } choices)
         {
-            var choices = Enumerable.Range(0, steps + 1).Select(step => Format(id, (double)step / steps, "")).ToList();
             parameter = EffectParameter.Choice(key, title, choices, defaultStep);
         }
         else if (steps == 1)
@@ -497,61 +633,107 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         }
 
         var binding = new Binding(id, steps, parameter, visible);
-        parameter.Value = binding.FromNormalized(VcPlugin.GetParam(_handle, id));
+        parameter.Value = binding.FromNormalized(info.Value);
         return binding;
     }
 
-    /// <summary>The plug-in's text for a value, e.g. "-6.0 dB". UI thread.</summary>
-    private unsafe string Format(uint id, double normalized, string units)
+    /// <summary>Programs first, then the preset files.</summary>
+    private void AddPresets(PluginDescription description, IReadOnlyList<string> folders)
     {
-        if (_handle.IsClosed)
+        if (description.ProgramParameter is uint program && description.Programs.Count > 1)
         {
-            return "";
+            for (int index = 0; index < description.Programs.Count; index++)
+            {
+                AddPreset(description.Programs[index], new PresetSource(program, (double)index / (description.Programs.Count - 1), null));
+            }
         }
 
-        const int capacity = 128;
-        byte* text = stackalloc byte[capacity];
-        if (VcPlugin.FormatParam(_handle, id, normalized, text, capacity) != VcPlugin.Ok)
+        foreach (var (name, path) in PluginPresetFiles.Find(Info, folders))
+        {
+            AddPreset(name, new PresetSource(0, 0, path));
+        }
+    }
+
+    private void AddPreset(string name, PresetSource source)
+    {
+        // The values belong to the plug-in: the record only names the preset.
+        var preset = new EffectPreset(name, new Dictionary<string, float>(), IsPartial: true);
+        _presetSources[preset] = source;
+        AddPreset(preset);
+    }
+
+    private string? SelectProgram(uint id, double value)
+    {
+        if (_bindingsById.TryGetValue(id, out var binding))
+        {
+            Queue(binding, value);
+        }
+
+        _plugin.SetParam(id, value);
+        ReadParameters();
+        HandleRestart();
+        return null;
+    }
+
+    private string? LoadPresetFile(string path)
+    {
+        string? error;
+        lock (_gate)
+        {
+            error = _plugin.LoadPreset(path);
+            if (error is null)
+            {
+                DropQueuedChanges();
+            }
+        }
+
+        if (error is null)
+        {
+            ReadParameters();
+            HandleRestart();
+        }
+
+        return error;
+    }
+
+    /// <summary>The plug-in's text for a value, e.g. "-6.0 dB". UI thread.</summary>
+    private string Format(uint id, double normalized, string units)
+    {
+        string? value = IsUsable ? _plugin.FormatParam(id, normalized) : null;
+        if (value is null)
         {
             return normalized.ToString("0.###", CultureInfo.CurrentCulture);
         }
 
-        string value = VcPlugin.Text(text, capacity);
         return string.IsNullOrEmpty(units) ? value : $"{value} {units}";
     }
 
     private void OnValueChanged(Binding binding)
     {
-        if (_origin != Origin.Host || _handle.IsClosed)
+        if (_origin != Origin.Host || !IsUsable)
         {
             return;
         }
 
         double normalized = binding.ToNormalized(binding.Parameter.Value);
         Queue(binding, normalized);
-        VcPlugin.SetParam(_handle, binding.Id, normalized);
+        _plugin.SetParam(binding.Id, normalized);
         HandleRestart();
     }
 
-    /// <summary>A parameter changed in the plug-in's own window (UI thread).</summary>
-    private void OnEdited(uint id, double value)
+    private void OnCrashed()
     {
-        if (!_bindingsById.TryGetValue(id, out var binding))
-        {
-            return;
-        }
-
-        Queue(binding, value);
-        Show(Origin.Editor, () => binding.Parameter.Value = binding.FromNormalized(value));
+        StatusChanged?.Invoke(this, EventArgs.Empty);
+        Crashed?.Invoke(this, EventArgs.Empty);
     }
 
-    private void RequestRestart(RestartFlags flags)
+    private void GiveUp(string problem)
     {
-        Interlocked.Or(ref _restartFlags, (int)flags);
-
-        // Requests made during VoiceChanger's own calls are handled when those return; others
-        // (from the plug-in's window, say) once the UI thread is free.
-        _context?.Post(static state => ((PluginEffect)state!).HandleRestart(), this);
+        _crashed = true;
+        _dead = false;
+        Problem = problem;
+        Trace.WriteLine($"{Name}: {problem}");
+        OnCrashed();
     }
 
     /// <summary>Shows the plug-in's current values in the parameters, without sending them back.</summary>
@@ -561,7 +743,7 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         {
             foreach (var binding in _bindings)
             {
-                binding.Parameter.Value = binding.FromNormalized(VcPlugin.GetParam(_handle, binding.Id));
+                binding.Parameter.Value = binding.FromNormalized(_plugin.GetParam(binding.Id));
             }
         });
     }
@@ -587,8 +769,22 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         Interlocked.Increment(ref _pendingChanges);
     }
 
-    /// <summary>Moves the queued changes into <see cref="_changes"/>. With the gate held.</summary>
-    private int CollectChanges()
+    /// <summary>Forgets edits that haven't reached the processor: a state or preset replaced them. With the gate held.</summary>
+    private void DropQueuedChanges()
+    {
+        foreach (var binding in _bindings)
+        {
+            Volatile.Write(ref binding.Dirty, 0);
+        }
+
+        Volatile.Write(ref _pendingChanges, 0);
+    }
+
+    /// <summary>
+    /// Moves queued changes into the buffers' change list, as many as fit; the rest go with the next
+    /// block. With the gate held.
+    /// </summary>
+    private unsafe int CollectChanges(PluginBuffers buffers)
     {
         if (Volatile.Read(ref _pendingChanges) == 0)
         {
@@ -596,36 +792,45 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
         }
 
         Interlocked.Exchange(ref _pendingChanges, 0);
+        var changes = buffers.Changes;
         int count = 0;
         foreach (var binding in _bindings)
         {
-            if (Interlocked.Exchange(ref binding.Dirty, 0) != 0)
+            if (Volatile.Read(ref binding.Dirty) == 0)
             {
-                _changes[count++] = new ParamChange { Id = binding.Id, Value = Volatile.Read(ref binding.Pending) };
+                continue;
             }
+
+            if (count == PluginBuffers.MaxChanges)
+            {
+                Interlocked.Increment(ref _pendingChanges);
+                break;
+            }
+
+            Interlocked.Exchange(ref binding.Dirty, 0);
+            changes[count++] = new ParamChange { Id = binding.Id, Value = Volatile.Read(ref binding.Pending) };
         }
 
         return count;
     }
 
     /// <summary>Hands queued changes to the processor without audio. With the gate held.</summary>
-    private unsafe void FlushChanges()
+    private void FlushChanges()
     {
-        if (!_active || _crashed)
+        if (!_active || !IsUsable)
         {
             return;
         }
 
-        int count = CollectChanges();
-        if (count == 0)
+        while (Volatile.Read(ref _pendingChanges) != 0)
         {
-            return;
-        }
+            int count = CollectChanges(_plugin.Buffers);
+            if (count == 0)
+            {
+                break;
+            }
 
-        fixed (nint* pointers = _channels)
-        fixed (ParamChange* changes = _changes)
-        {
-            VcPlugin.Process(_handle, (float**)pointers, null, (float**)(pointers + (OutputRegion * 2)), 0, changes, count);
+            _plugin.Process(0, false, count);
         }
     }
 
@@ -635,7 +840,7 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
     /// </summary>
     private void DeliverChanges()
     {
-        if (Volatile.Read(ref _pendingChanges) == 0 || _crashed)
+        if (Volatile.Read(ref _pendingChanges) == 0 || !IsUsable)
         {
             return;
         }
@@ -651,12 +856,12 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
             // Never set up (or it failed): only a set-up processor takes parameter changes.
             int sampleRate = IsPrepared ? SampleRate : 48000;
             int channels = IsPrepared ? Math.Min(Channels, 2) : 2;
-            if (VcPlugin.Setup(_handle, sampleRate, MaxBlockFrames, channels) == VcPlugin.Ok)
+            if (_plugin.Setup(sampleRate, channels, out _) is null)
             {
                 _active = true;
                 FlushChanges();
                 _active = false;
-                VcPlugin.Suspend(_handle);
+                _plugin.Suspend();
             }
         }
     }
@@ -665,7 +870,7 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
     private void Setup()
     {
         _active = false;
-        if (_handle.IsClosed || _crashed)
+        if (!IsUsable)
         {
             return;
         }
@@ -676,43 +881,20 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
             return;
         }
 
-        if (VcPlugin.Setup(_handle, SampleRate, MaxBlockFrames, Channels) != VcPlugin.Ok)
+        if (_plugin.Setup(SampleRate, Channels, out int latency) is { } error)
         {
-            Problem = $"{Name} can't run at {SampleRate} Hz: {VcPlugin.LastError}";
+            Problem = $"{Name} can't run at {SampleRate} Hz: {error}";
             Trace.WriteLine(Problem);
             return;
         }
 
-        _latency = Math.Max(0, VcPlugin.GetLatency(_handle));
+        _latency = latency;
         Problem = null;
         _active = true;
     }
 
-    private void Deinterleave(ReadOnlySpan<float> interleaved, int region, int channels)
-    {
-        int frames = interleaved.Length / channels;
-        for (int channel = 0; channel < channels; channel++)
-        {
-            var target = _audio.AsSpan(((region * 2) + channel) * MaxBlockFrames, frames);
-            for (int frame = 0, i = channel; frame < frames; frame++, i += channels)
-            {
-                target[frame] = interleaved[i];
-            }
-        }
-    }
-
-    private void Interleave(Span<float> interleaved, int channels)
-    {
-        int frames = interleaved.Length / channels;
-        for (int channel = 0; channel < channels; channel++)
-        {
-            var source = _audio.AsSpan(((OutputRegion * 2) + channel) * MaxBlockFrames, frames);
-            for (int frame = 0, i = channel; frame < frames; frame++, i += channels)
-            {
-                interleaved[i] = source[frame];
-            }
-        }
-    }
+    /// <summary>A program, or a preset file.</summary>
+    private sealed record PresetSource(uint Program, double Value, string? Path);
 
     /// <summary>A plug-in parameter and the <see cref="EffectParameter"/> that shows it.</summary>
     private sealed class Binding(uint id, int steps, EffectParameter parameter, bool isVisible)
@@ -745,8 +927,8 @@ public class PluginEffect : AudioEffect, IStatefulEffect, IDisposable
 /// <summary>A plug-in with a side-chain input: its node gets a second socket for it.</summary>
 internal sealed class SidechainPluginEffect : PluginEffect, ISidechainEffect
 {
-    internal SidechainPluginEffect(PluginInfo info, PluginHandle handle, in PluginInfoNative native)
-        : base(info, handle, native)
+    internal SidechainPluginEffect(PluginInfo info, IPluginInstance plugin, PluginHosting hosting)
+        : base(info, plugin, hosting)
     {
     }
 }
