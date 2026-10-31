@@ -82,7 +82,8 @@ public abstract class AudioEffect
     public EffectParameter GetParameter(string id) =>
         FindParameter(id) ?? throw new KeyNotFoundException($"{Name} has no parameter '{id}'.");
 
-    public void ApplyPreset(EffectPreset preset)
+    /// <summary>Sets the parameters to the preset's values (an effect with presets of its own may do more).</summary>
+    public virtual void ApplyPreset(EffectPreset preset)
     {
         ArgumentNullException.ThrowIfNull(preset);
         foreach (var parameter in _parameters)
@@ -99,7 +100,7 @@ public abstract class AudioEffect
     }
 
     /// <summary>The first preset whose values equal the current settings, if any.</summary>
-    public EffectPreset? FindMatchingPreset() => _presets.FirstOrDefault(p => p.Matches(_parameters));
+    public virtual EffectPreset? FindMatchingPreset() => _presets.FirstOrDefault(p => p.Matches(_parameters));
 
     public void ResetParameters()
     {
@@ -162,6 +163,16 @@ public abstract class AudioEffect
         _parameters.Add(parameter);
         return parameter;
     }
+
+    /// <summary>Adds a preset the effect applies itself (see <see cref="ApplyPreset"/>).</summary>
+    protected void AddPreset(EffectPreset preset)
+    {
+        ArgumentNullException.ThrowIfNull(preset);
+        _presets.Add(preset);
+    }
+
+    /// <summary>Takes back the presets, e.g. to list them afresh.</summary>
+    protected void ClearPresets() => _presets.Clear();
 
     protected void AddPreset(string name, params (string Id, float Value)[] values) =>
         _presets.Add(new EffectPreset(name, values.ToDictionary(v => v.Id, v => v.Value, StringComparer.OrdinalIgnoreCase)));

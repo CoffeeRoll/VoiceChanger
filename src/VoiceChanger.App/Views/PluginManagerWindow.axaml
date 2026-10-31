@@ -1,0 +1,111 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:VoiceChanger.App.ViewModels"
+        x:Class="VoiceChanger.App.Views.PluginManagerWindow"
+        x:DataType="vm:PluginManagerViewModel"
+        Title="Plug-ins"
+        Width="720"
+        Height="640"
+        MinWidth="480"
+        MinHeight="360"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}">
+  <Grid RowDefinitions="Auto,*" Margin="24,20">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="0,0,0,14">
+      <StackPanel Spacing="2">
+        <TextBlock Classes="h1" Text="VST3 plug-ins" />
+        <TextBlock x:Name="StatusText" Classes="muted" Text="{Binding Status}" TextWrapping="Wrap" />
+      </StackPanel>
+      <Button Grid.Column="1"
+              x:Name="ScanButton"
+              Content="Look again"
+              Command="{Binding ScanCommand}"
+              IsEnabled="{Binding IsAvailable}"
+              VerticalAlignment="Center"
+              ToolTip.Tip="Look through the folders for new, changed and removed plug-ins" />
+    </Grid>
+
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Spacing="22">
+        <StackPanel Spacing="6">
+          <CheckBox x:Name="SeparateProcessesBox" IsChecked="{Binding SeparateProcesses}">
+            <TextBlock Text="Run each plug-in in a process of its own (recommended)" />
+          </CheckBox>
+          <TextBlock Classes="muted"
+                     TextWrapping="Wrap"
+                     Text="Then a plug-in that crashes or hangs only stops itself: VoiceChanger starts it again with its settings. Applies to plug-ins you add or load from now on." />
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="h2" Text="Folders" VerticalAlignment="Center" />
+            <Button Grid.Column="1" x:Name="AddFolderButton" Content="Add folder…" Click="OnAddFolderClick" />
+          </Grid>
+          <ItemsControl x:Name="FolderList" ItemsSource="{Binding Folders}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:PluginFolderRow">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10" Margin="0,2">
+                  <TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="{Binding Path}" />
+                  <TextBlock Grid.Column="1" Classes="muted" Text="{Binding Kind}" VerticalAlignment="Center" />
+                  <Button Grid.Column="2" Content="Remove" Command="{Binding RemoveCommand}" IsVisible="{Binding CanRemove}" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel Spacing="8" IsVisible="{Binding HasFailed}">
+          <TextBlock Classes="h2" Text="Didn't load" />
+          <ItemsControl x:Name="FailedList" ItemsSource="{Binding Failed}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:FailedModuleRow">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" Margin="0,3">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding Name}" ToolTip.Tip="{Binding Path}" />
+                    <TextBlock Classes="muted" Text="{Binding Reason}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Content="Try again" Command="{Binding RetryCommand}" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel Spacing="8" IsVisible="{Binding HasBlocked}">
+          <TextBlock Classes="h2" Text="Kept out" />
+          <TextBlock Classes="muted" TextWrapping="Wrap" Text="These aren't offered in the menus; ones you saved before load as stand-ins that keep their settings." />
+          <ItemsControl x:Name="BlockedList" ItemsSource="{Binding Blocked}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:BlockedPluginRow">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" Margin="0,3">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding Name}" />
+                    <TextBlock Classes="muted" Text="{Binding Reason}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Content="Let back in" Command="{Binding UnblockCommand}" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="Installed" />
+          <ItemsControl x:Name="PluginList" ItemsSource="{Binding Plugins}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:PluginRow">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" Margin="0,3">
+                  <StackPanel Spacing="1" ToolTip.Tip="{Binding Path}">
+                    <TextBlock Text="{Binding Name}" />
+                    <TextBlock Classes="muted" Text="{Binding Details}" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Content="Keep out" Command="{Binding BlockCommand}" VerticalAlignment="Center" ToolTip.Tip="Don't offer this plug-in in the menus" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</Window>

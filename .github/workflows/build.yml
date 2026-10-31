@@ -26,6 +26,12 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # The VST3 host bridge and the test plug-in (the SDK is downloaded at the tag pinned in native/CMakeLists.txt).
+      - name: Build native code
+        run: |
+          cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/build --config Release --parallel
+
       - name: Restore
         run: dotnet restore VoiceChanger.sln
 
@@ -57,6 +63,11 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Build native code
+        run: |
+          cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/build --config Release --parallel --target vcplugin
+
       - name: Publish self-contained single file
         run: >
           dotnet publish src/VoiceChanger.App/VoiceChanger.App.csproj
@@ -72,4 +83,26 @@ jobs:
         with:
           name: VoiceChanger-win-x64
           path: publish/VoiceChanger.exe
+          if-no-files-found: error
+
+      # ARM64: the app and its bridge built for ARM64, and an x64 plug-in host for x64-only plug-ins
+      # (Windows runs it under emulation).
+      - name: Build native code for ARM64
+        run: |
+          cmake -S native -B native/build-arm64 -A ARM64 -DVC_VST3SDK_DIR="${{ github.workspace }}/native/build/_deps/vst3sdk-src"
+          cmake --build native/build-arm64 --config Release --parallel --target vcplugin
+
+      - name: Publish the ARM64 app and its x64 plug-in host
+        run: |
+          dotnet publish src/VoiceChanger.App/VoiceChanger.App.csproj -c Release -r win-arm64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=None "-p:VcPluginDir=${{ github.workspace }}/native/build-arm64/out/" -o publish-arm64
+          dotnet publish src/VoiceChanger.PluginHost/VoiceChanger.PluginHost.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=None -o publish-host-x64
+          Copy-Item publish-host-x64/VoiceChanger.PluginHost.exe publish-arm64/VoiceChanger.PluginHost-x64.exe
+
+      - name: Upload the ARM64 app
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceChanger-win-arm64
+          path: |
+            publish-arm64/VoiceChanger.exe
+            publish-arm64/VoiceChanger.PluginHost-x64.exe
           if-no-files-found: error

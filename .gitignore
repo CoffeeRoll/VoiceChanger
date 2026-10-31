@@ -10,3 +10,6 @@ TestResults/
 .vscode/
 .idea/
 *.DotSettings.user
+
+## Native build output
+native/build/

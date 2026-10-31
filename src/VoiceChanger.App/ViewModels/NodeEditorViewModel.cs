@@ -3,6 +3,7 @@ using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VoiceChanger.Core.Audio;
+using VoiceChanger.Core.Effects;
 using VoiceChanger.Core.Graph;
 using VoiceChanger.Core.Settings;
 
@@ -41,9 +42,7 @@ public sealed partial class NodeEditorViewModel : ObservableObject
         _registry = registry;
         _inputDevices = inputDevices;
         _outputDevices = outputDevices;
-        AddNodeOptions = registry.Descriptors
-            .Select(d => new AddNodeOption(d, new RelayCommand(() => AddNode(d))))
-            .ToList();
+        BuildAddNodeOptions();
         graph.Changed += (_, _) => Sync();
         Sync();
     }
@@ -54,7 +53,11 @@ public sealed partial class NodeEditorViewModel : ObservableObject
 
     public ObservableCollection<WireViewModel> Wires { get; } = [];
 
-    public IReadOnlyList<AddNodeOption> AddNodeOptions { get; }
+    /// <summary>Every node that can be added.</summary>
+    public IReadOnlyList<AddNodeOption> AddNodeOptions { get; private set; } = [];
+
+    /// <summary>The "Add node" menu: the built-in nodes, with the plug-ins by vendor after the effects.</summary>
+    public IReadOnlyList<AddMenuEntry> AddNodeMenu { get; private set; } = [];
 
     public bool IsEmpty => Nodes.Count == 0;
 
@@ -128,8 +131,23 @@ public sealed partial class NodeEditorViewModel : ObservableObject
         }
 
         SelectedNode = viewModel;
-        Hint = null;
+        Hint = node is EffectNode { Effect: MissingEffect } ? $"{descriptor.Name} could not be loaded." : null;
         return viewModel;
+    }
+
+    /// <summary>(Re)builds <see cref="AddNodeOptions"/> from the registry, e.g. once more plug-ins were found.</summary>
+    public void BuildAddNodeOptions()
+    {
+        AddNodeOptions = _registry.Descriptors
+            .Select(d => new AddNodeOption(d, new RelayCommand(() => AddNode(d))))
+            .ToList();
+        AddNodeMenu = AddMenuEntry.Build(
+            AddNodeOptions,
+            o => o.Descriptor.Group,
+            o => new AddMenuEntry(o.Name, o.Description, o.Command),
+            pluginsAfter: o => o.Descriptor.Category <= NodeCategory.Effect);
+        OnPropertyChanged(nameof(AddNodeOptions));
+        OnPropertyChanged(nameof(AddNodeMenu));
     }
 
     public void RemoveNode(NodeViewModel node)
@@ -245,6 +263,13 @@ public sealed partial class NodeEditorViewModel : ObservableObject
                 }
 
                 Nodes[i].Detach();
+
+                // A removed plug-in lets go of its window and its host process.
+                if (Nodes[i].Node is EffectNode { Effect: IDisposable effect })
+                {
+                    effect.Dispose();
+                }
+
                 Nodes.RemoveAt(i);
             }
         }
@@ -254,7 +279,10 @@ public sealed partial class NodeEditorViewModel : ObservableObject
             var viewModel = Find(node);
             if (viewModel is null)
             {
-                viewModel = NodeViewModel.Create(node, _registry.Find(node.TypeId)?.Description ?? "", _inputDevices, _outputDevices);
+                string description = node is EffectNode { Effect: MissingEffect }
+                    ? MissingEffect.Explanation
+                    : _registry.Find(node.TypeId)?.Description ?? "";
+                viewModel = NodeViewModel.Create(node, description, _inputDevices, _outputDevices);
                 var added = viewModel;
                 viewModel.DeleteCommand = new RelayCommand(() => RemoveNode(added));
                 viewModel.DuplicateCommand = new RelayCommand(() =>

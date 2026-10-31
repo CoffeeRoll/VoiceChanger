@@ -3,6 +3,9 @@ namespace VoiceChanger.Core.Effects;
 /// <summary>Describes an effect type that can be added to a chain.</summary>
 public sealed record EffectDescriptor(string TypeId, string Name, string Description, Func<AudioEffect> Create)
 {
+    /// <summary>Where menus list it: <c>null</c> for the built-in effects, the vendor for a plug-in.</summary>
+    public string? Group { get; init; }
+
     public override string ToString() => Name;
 }
 
@@ -51,6 +54,10 @@ public sealed class EffectRegistry
 
         _descriptors.Add(descriptor);
     }
+
+    /// <summary>Takes an effect type out (a plug-in that was blocked). Returns whether it was there.</summary>
+    public bool Unregister(string typeId) =>
+        _descriptors.RemoveAll(d => string.Equals(d.TypeId, typeId, StringComparison.OrdinalIgnoreCase)) > 0;
 
     public EffectDescriptor? Find(string typeId) =>
         _descriptors.FirstOrDefault(d => string.Equals(d.TypeId, typeId, StringComparison.OrdinalIgnoreCase));

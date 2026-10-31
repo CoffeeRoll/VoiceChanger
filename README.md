@@ -46,6 +46,9 @@ pick an output, and hear the result live with low delay.
 - **Vocoder:** your voice shapes another sound: a robot that follows your pitch, a monotone robot, a
   choir, a whisper, or (in the node editor) any instrument or music plugged into its *Carrier*
   socket. See [Vocoder](#vocoder) below.
+- **VST3 plugins:** the VST3 effects installed on your computer appear under **Add effect** and
+  **Add node**, with their own windows, presets, delay compensation and side-chain sockets. Each runs
+  in a process of its own, so one that crashes is simply restarted. See [Plugins](#plugins-vst3).
 - **Node editor** for anything beyond one microphone and one chain: several inputs at once, a
   **mixer** to combine them, a **synchronizer** to line them up in time, effects anywhere in between,
   and several outputs. See [Node editor](#node-editor) below.
@@ -176,11 +179,48 @@ your voice has in each. The carrier is:
 
 Presets: Robot, Deep robot, Monotone, Choir, Whisper, Classic (16 bands). The vocoder adds no delay.
 
-## Plugins (planned)
+## Plugins (VST3)
 
-Third-party VST3 effects aren't supported yet. [docs/vst-plugin-support.md](docs/vst-plugin-support.md)
-describes what it would take: a native bridge to the VST3 SDK, plugins as regular effects and nodes,
-plugin windows, scanning in a separate process, saved plugin state, and crash isolation.
+VoiceChanger can use the VST3 effects you have installed, both in the effect chain and as nodes
+(milestones M1 to M3 of [docs/vst-plugin-support.md](docs/vst-plugin-support.md)).
+
+- **Finding plugins:** the app looks in the standard VST3 folders (`C:\Program Files\Common Files\VST3`
+  and `%LOCALAPPDATA%\Programs\Common\VST3`) and any you add. It reads each plugin's
+  `moduleinfo.json` when there is one; otherwise it loads the plugin in a separate run of itself, so a
+  plugin that crashes while loading can't take the app down. Results are remembered in `plugins.json`
+  next to the settings, so only new or changed plugins are looked at again. The scan runs in the
+  background after the window opens, and plugins it finds join the menus straight away.
+- **Using them:** **Add effect** and **Add node** have a **Plug-ins** submenu, by vendor. A plugin's
+  settings appear as the usual sliders, lists and switches, labelled with the plugin's own text (for
+  example "-6.0 dB"). Its on/off switch is VoiceChanger's; the plugin's own bypass is hidden.
+- **Plugin windows:** **Open plug-in window** on the plugin's card (or in the node inspector) shows the
+  plugin's own controls in a window that stays in front of VoiceChanger. It follows the plugin's size,
+  can be resized when the plugin allows, and scales with the monitor. Turning a knob there moves the
+  slider in VoiceChanger too.
+- **Presets:** the plugin's own programs and the `.vstpreset` files in the VST3 preset folders
+  (`Documents\VST3 Presets\<vendor>\<plugin>`) are in its preset list.
+- **Each plugin in a process of its own** (the default): a plugin that crashes, or stops answering
+  for a second, only stops itself. The audio goes on without it while VoiceChanger starts it again with
+  its settings; one that crashes three times within a minute is stopped and kept out of the menus.
+  The audio is handed over within the same block (through shared memory), so this adds no delay.
+- **Plug-in manager** (**Plug-ins** at the top of the window): the folders to look in (add your own),
+  the plugins found, the ones that didn't load and why (with *Try again*), the ones kept out of the
+  menus (*Let back in*), and the setting to run plugins in the app instead.
+- **ARM64 Windows:** the ARM64 build runs plugins made for ARM64 directly, and x64-only plugins in
+  `VoiceChanger.PluginHost-x64.exe` next to it, under Windows' emulation.
+- **Delay:** the plugin's latency counts toward the delay figure and the Synchronizer. When a plugin
+  changes its latency (a look-ahead setting, say), VoiceChanger restarts it, as VST3 asks hosts to.
+- **Side-chain:** a plugin with a side-chain input (ducking compressors, vocoders) gets a second socket
+  on its node. With nothing plugged in, the plugin hears its own input there.
+- **Mono and stereo:** plugins run in whichever mode you use; stereo-only plugins get the voice on both
+  channels and their result folded back to mono.
+- **Saving:** the plugin's complete state is saved with your settings and node graph. A plugin that
+  isn't installed any more shows as "*name* (missing)": the audio passes through, and its settings are
+  kept, so it comes back as it was when you reinstall it.
+
+Plugin windows are Windows only. Running plugins inside the app (the manager's setting) is a little
+lighter, but then a plugin that corrupts memory or hangs can take the app down; a crash while
+processing is still caught on Windows.
 
 ## Auto Tune
 
@@ -248,7 +288,8 @@ Switch freely while you listen: the change is immediate.
 
 Every push runs the **Build** workflow in GitHub Actions. To download the app, open the latest
 successful run and get the `VoiceChanger-win-x64` artifact. It contains a self-contained
-`VoiceChanger.exe` that runs without installing .NET.
+`VoiceChanger.exe` that runs without installing .NET. For ARM64 Windows there is
+`VoiceChanger-win-arm64`, with the x64 plugin host to keep next to it.
 
 ### Build from source
 
@@ -258,6 +299,15 @@ Requirements: Windows 10 or 11 and the [.NET 10 SDK](https://dotnet.microsoft.co
 git clone <this repository>
 cd VoiceChanger
 dotnet run --project src/VoiceChanger.App -c Release
+```
+
+Plugin support needs the native bridge, built with CMake and a C++ compiler (on Windows, Visual
+Studio 2022 with the *Desktop development with C++* workload). It downloads the VST3 SDK the first time.
+Without it the app runs normally, just without plugins.
+
+```powershell
+cmake -S native -B native/build
+cmake --build native/build --config Release
 ```
 
 To create a single-file executable:
@@ -273,7 +323,8 @@ To run the tests:
 dotnet test
 ```
 
-The tests also run on Linux and macOS. Audio input and output currently use WASAPI, so they only
+The plugin tests use a small test plugin from the same native build, and are skipped when it hasn't
+been built (on CI they fail instead). The tests also run on Linux and macOS. Audio input and output currently use WASAPI, so they only
 work on Windows. On other systems the window opens, but the device lists are empty.
 
 ## How it works
@@ -307,8 +358,12 @@ work on Windows. On other systems the window opens, but the device lists are emp
 | --- | --- |
 | `src/VoiceChanger.Core` | Platform-independent DSP and engine: biquad filters, FFT, resampler, ring buffer, the effects, the effect chain, the audio processor/engine, the node graph and its multi-device engine, and the settings. |
 | `src/VoiceChanger.Audio.Wasapi` | Windows audio backend built on [NAudio](https://github.com/naudio/NAudio) (WASAPI). |
+| `src/VoiceChanger.Plugins` | VST3 plugins as effects: `PluginEffect`, plugin windows, the out-of-process host (protocol, shared-memory audio, recovery), the scanner and the plugin catalogue, on top of the native bridge. |
+| `src/VoiceChanger.PluginHost` | A small host program for one plugin; the ARM64 build ships its x64 build for x64-only plugins (the app hosts plugins of its own architecture itself). |
 | `src/VoiceChanger.App` | The desktop app, built with [Avalonia UI](https://avaloniaui.net/) and CommunityToolkit.Mvvm. |
+| `native/` | C++ (CMake): `vcplugin`, a small C API over the [VST3 SDK](https://github.com/steinbergmedia/vst3sdk)'s hosting classes, and `VoiceChangerTest.vst3`, a test plugin. |
 | `tests/VoiceChanger.Core.Tests` | Checks the DSP output: filter responses, pitch shifting and pitch detection accuracy, formant preservation on synthetic vowels, auto-tune correction, resampling, drift compensation with simulated device clocks, and settings. |
+| `tests/VoiceChanger.Plugins.Tests` | Hosts the test plugin in the app's process and in a host process: parameters, processing, latency restarts, the side-chain, state, presets, settings, missing plugins, scanning, crashes and hangs, architectures, and (on Windows) its window. |
 | `tests/VoiceChanger.App.Tests` | Headless UI tests that load the real window with fake audio devices, drive the node editor with the mouse, and render screenshots. |
 
 ### Adding an effect
@@ -344,3 +399,11 @@ public sealed class GainEffect : AudioEffect
 
 Another audio API (for example PulseAudio or Core Audio) can be added by implementing
 `IAudioBackend` and returning it from `AudioBackendFactory`.
+
+## Third-party code
+
+- [VST3 SDK](https://github.com/steinbergmedia/vst3sdk) by Steinberg Media Technologies, MIT licence
+  (downloaded by the native build, not part of this repository). VST is a registered trademark of
+  Steinberg Media Technologies GmbH.
+- [NAudio](https://github.com/naudio/NAudio), MIT licence.
+- [Avalonia UI](https://avaloniaui.net/) and [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet), MIT licence.

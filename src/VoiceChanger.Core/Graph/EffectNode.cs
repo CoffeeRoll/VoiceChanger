@@ -12,6 +12,9 @@ public sealed class EffectNode : AudioNode
     /// <summary>Effect nodes are saved as this prefix followed by the effect's type id.</summary>
     public const string TypePrefix = "effect:";
 
+    /// <summary>Id of the second input of an effect that has a side-chain.</summary>
+    public const string SidechainPort = "sidechain";
+
     private float[] _sidechain = [];
 
     public EffectNode(AudioEffect effect)
@@ -23,7 +26,7 @@ public sealed class EffectNode : AudioNode
             ?
             [
                 CreatePort("in", sidechain.InputName, PortDirection.Input, 0),
-                CreatePort("sidechain", sidechain.SidechainName, PortDirection.Input, 1),
+                CreatePort(SidechainPort, sidechain.SidechainName, PortDirection.Input, 1),
             ]
             : [CreatePort("in", "Audio", PortDirection.Input, 0)];
         SetPorts(inputs, [CreatePort("out", "Audio", PortDirection.Output, 0)]);

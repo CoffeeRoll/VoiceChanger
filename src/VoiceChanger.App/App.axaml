@@ -1,5 +1,6 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:VoiceChanger.App.ViewModels"
              x:Class="VoiceChanger.App.App"
              RequestedThemeVariant="Dark">
 
@@ -87,6 +88,15 @@
         <Style Selector="^:disabled">
           <Setter Property="Opacity" Value="0.45" />
         </Style>
+      </ControlTheme>
+
+      <!-- An entry of the "Add effect" and "Add node" menus; plug-ins come in submenus. -->
+      <ControlTheme x:Key="AddMenuItemTheme" TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}" x:DataType="vm:AddMenuEntry">
+        <Setter Property="Header" Value="{Binding Name}" />
+        <Setter Property="Command" Value="{Binding Command}" />
+        <Setter Property="ToolTip.Tip" Value="{Binding Description}" />
+        <Setter Property="ItemsSource" Value="{Binding Items}" />
+        <Setter Property="ItemContainerTheme" Value="{DynamicResource AddMenuItemTheme}" />
       </ControlTheme>
     </ResourceDictionary>
   </Application.Resources>

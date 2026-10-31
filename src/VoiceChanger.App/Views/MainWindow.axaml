@@ -30,6 +30,9 @@
     <DataTemplate DataType="vm:GenericEffectViewModel">
       <views:GenericEffectEditor />
     </DataTemplate>
+    <DataTemplate DataType="vm:PluginEffectViewModel">
+      <views:PluginEffectEditor />
+    </DataTemplate>
   </Window.DataTemplates>
 
   <Grid RowDefinitions="Auto,*,Auto">
@@ -69,6 +72,11 @@
         </Border>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+          <Button x:Name="PluginManagerButton"
+                  Content="Plug-ins"
+                  IsVisible="{Binding HasPlugins}"
+                  Click="OnPluginManagerClick"
+                  ToolTip.Tip="Where VST3 plug-ins come from, how they run, and which ones didn't load" />
           <!-- Step 4: master switch for every effect. -->
           <Border Classes="step" IsVisible="{Binding IsChainMode}" ToolTip.Tip="Step 4: turn the effects on or off">
             <TextBlock Text="4" />
@@ -179,15 +187,7 @@
                 <TextBlock Text="Add effect" />
               </StackPanel>
               <DropDownButton.Flyout>
-                <MenuFlyout Placement="BottomEdgeAlignedRight" ItemsSource="{Binding AddEffectOptions}">
-                  <MenuFlyout.ItemContainerTheme>
-                    <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}" x:DataType="vm:AddEffectOption">
-                      <Setter Property="Header" Value="{Binding Name}" />
-                      <Setter Property="Command" Value="{Binding Command}" />
-                      <Setter Property="ToolTip.Tip" Value="{Binding Description}" />
-                    </ControlTheme>
-                  </MenuFlyout.ItemContainerTheme>
-                </MenuFlyout>
+                <MenuFlyout Placement="BottomEdgeAlignedRight" ItemsSource="{Binding AddEffectMenu}" ItemContainerTheme="{StaticResource AddMenuItemTheme}" />
               </DropDownButton.Flyout>
             </DropDownButton>
             </StackPanel>
@@ -336,15 +336,7 @@
             <TextBlock Text="Add node" />
           </StackPanel>
           <DropDownButton.Flyout>
-            <MenuFlyout Placement="BottomEdgeAlignedLeft" ItemsSource="{Binding NodeEditor.AddNodeOptions}">
-              <MenuFlyout.ItemContainerTheme>
-                <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}" x:DataType="vm:AddNodeOption">
-                  <Setter Property="Header" Value="{Binding Name}" />
-                  <Setter Property="Command" Value="{Binding Command}" />
-                  <Setter Property="ToolTip.Tip" Value="{Binding Description}" />
-                </ControlTheme>
-              </MenuFlyout.ItemContainerTheme>
-            </MenuFlyout>
+            <MenuFlyout Placement="BottomEdgeAlignedLeft" ItemsSource="{Binding NodeEditor.AddNodeMenu}" ItemContainerTheme="{StaticResource AddMenuItemTheme}" />
           </DropDownButton.Flyout>
         </DropDownButton>
         <Button Grid.Column="1" Command="{Binding NodeEditor.FitViewCommand}" ToolTip.Tip="Show every node (Home)">

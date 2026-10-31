@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>VoiceChanger.PluginHost</RootNamespace>
+    <AssemblyName>VoiceChanger.PluginHost</AssemblyName>
+    <Description>Runs one VST3 plug-in for VoiceChanger in a process of its own (and scans plug-ins).</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VoiceChanger.Plugins\VoiceChanger.Plugins.csproj" />
+  </ItemGroup>
+
+</Project>
