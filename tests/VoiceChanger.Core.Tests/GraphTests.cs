@@ -155,11 +155,11 @@ public class AudioGraphTests
     }
 
     [Fact]
-    public void The_registry_offers_devices_generators_every_effect_the_mixer_and_the_synchronizer()
+    public void The_registry_offers_devices_generators_effects_and_the_mixing_nodes()
     {
         var registry = NodeRegistry.Default;
         Assert.Equal(
-            ["input", "tone", "effect:pitch-shift", "effect:auto-tune", "effect:equalizer", "effect:vocoder", "mixer", "sync", "output"],
+            ["input", "tone", "effect:pitch-shift", "effect:auto-tune", "effect:equalizer", "effect:vocoder", "invert", "mixer", "sync", "split-stereo", "output"],
             registry.Descriptors.Select(d => d.TypeId));
 
         var node = Assert.IsType<EffectNode>(registry.Create("effect:auto-tune"));
@@ -365,6 +365,85 @@ public class GraphPlanTests
         Assert.Equal(0.501, ToneAmplitude(left, 300, Rate), 0.01);
         Assert.Equal(0.251, ToneAmplitude(left, 1100, Rate), 0.01);
         Assert.Equal(left, Channel(signal.ToArray(), 2, 1));
+    }
+
+    [Fact]
+    public void Split_stereo_sends_each_channel_to_an_output_of_its_own()
+    {
+        var graph = new AudioGraph();
+        var device = graph.Add(new InputDeviceNode { DeviceId = "interface" });
+        var split = graph.Add(new StereoSplitNode());
+        var leftOut = graph.Add(new OutputDeviceNode());
+        var rightOut = graph.Add(new OutputDeviceNode());
+        graph.Connect(device.Outputs[0], split.Inputs[0]);
+        graph.Connect(split.Outputs[0], leftOut.Inputs[0]);
+        graph.Connect(split.Outputs[1], rightOut.Inputs[0]);
+
+        // A different microphone on each input of the interface: 300 Hz on the left, 1100 Hz on the right.
+        var left = Sine(300, Rate, Rate / 2, amplitude: 0.4);
+        var right = Sine(1100, Rate, Rate / 2, amplitude: 0.2);
+        var stereo = new float[Rate];
+        for (int n = 0; n < Rate / 2; n++)
+        {
+            stereo[2 * n] = left[n];
+            stereo[2 * n + 1] = right[n];
+        }
+
+        var mixes = Run(graph, Rate / 2, channels: 2, inputs: new() { [device] = stereo });
+
+        // Each track plays on both channels, in the middle.
+        foreach (int channel in new[] { 0, 1 })
+        {
+            var fromLeft = Channel(mixes[leftOut].ToArray(), 2, channel);
+            var fromRight = Channel(mixes[rightOut].ToArray(), 2, channel);
+            Assert.Equal(left, fromLeft);
+            Assert.Equal(right, fromRight);
+        }
+
+        Assert.Equal(0.4f, split.Meter.ReadAndReset(), 0.01f);
+    }
+
+    [Fact]
+    public void In_mono_both_split_outputs_carry_the_signal()
+    {
+        var graph = new AudioGraph();
+        var mic = graph.Add(new InputDeviceNode { DeviceId = "mic" });
+        var split = graph.Add(new StereoSplitNode());
+        var first = graph.Add(new OutputDeviceNode());
+        var second = graph.Add(new OutputDeviceNode());
+        graph.Connect(mic.Outputs[0], split.Inputs[0]);
+        graph.Connect(split.Outputs[0], first.Inputs[0]);
+        graph.Connect(split.Outputs[1], second.Inputs[0]);
+        var voice = Sine(500, Rate, Rate / 4, amplitude: 0.3);
+
+        var mixes = Run(graph, Rate / 4, inputs: new() { [mic] = voice });
+
+        Assert.Equal(voice, mixes[first]);
+        Assert.Equal(voice, mixes[second]);
+    }
+
+    [Fact]
+    public void Invert_turns_the_signal_upside_down_and_cancels_it_in_a_mix()
+    {
+        var graph = new AudioGraph();
+        var tone = Tone(graph, 440, -6);
+        var invert = graph.Add(new InvertNode());
+        var mixer = graph.Add(new MixerNode());
+        var plain = graph.Add(new OutputDeviceNode());
+        var inverted = graph.Add(new OutputDeviceNode());
+        var cancelled = graph.Add(new OutputDeviceNode());
+        graph.Connect(tone.Outputs[0], plain.Inputs[0]);
+        graph.Connect(tone.Outputs[0], invert.Inputs[0]);
+        graph.Connect(invert.Outputs[0], inverted.Inputs[0]);
+        graph.Connect(tone.Outputs[0], mixer.Inputs[0]);
+        graph.Connect(invert.Outputs[0], mixer.Inputs[1]);
+        graph.Connect(mixer.Outputs[0], cancelled.Inputs[0]);
+
+        var mixes = Run(graph, Rate / 4, channels: 2);
+
+        Assert.True(Rms(mixes[plain].ToArray()) > 0.3);
+        Assert.Equal(mixes[plain].Select(s => -s), mixes[inverted]);
+        Assert.All(mixes[cancelled], s => Assert.Equal(0f, s));
     }
 
     [Fact]

@@ -42,6 +42,12 @@ public sealed class NodeRegistry
         }
 
         registry.Register(new NodeDescriptor(
+            InvertNode.Type,
+            "Invert",
+            "Turns the signal upside down (inverts its polarity). It sounds the same on its own, but cancels out the signal it came from when the two are mixed: for a microphone wired the wrong way round, or to take out what two signals share.",
+            NodeCategory.Effect,
+            () => new InvertNode()));
+        registry.Register(new NodeDescriptor(
             MixerNode.Type,
             "Mixer",
             "Combines up to eight signals into one, each with its own volume.",
@@ -53,6 +59,12 @@ public sealed class NodeRegistry
             "Lines up several signals in time, so sources that went through effects or come from slower devices play together.",
             NodeCategory.Mixing,
             () => new SyncNode()));
+        registry.Register(new NodeDescriptor(
+            StereoSplitNode.Type,
+            "Split Stereo",
+            "Splits a stereo signal into a left and a right track, each with an output of its own: for two microphones on the two inputs of one interface, say. Needs Mono off.",
+            NodeCategory.Mixing,
+            () => new StereoSplitNode()));
         registry.Register(new NodeDescriptor(
             OutputDeviceNode.Type,
             "Audio Output",

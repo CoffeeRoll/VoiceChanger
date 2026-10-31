@@ -222,6 +222,21 @@
                       </StackPanel>
                     </DataTemplate>
 
+                    <DataTemplate DataType="vm:StereoSplitNodeViewModel">
+                      <StackPanel Spacing="12">
+                        <Border Classes="hint" IsVisible="{Binding IsMono}">
+                          <TextBlock x:Name="SplitMonoNotice"
+                                     Text="Mono is on, so every signal is mixed to one channel as it is recorded and both outputs carry the same sound. Untick Mono in the toolbar to split left from right."
+                                     Foreground="{StaticResource WarningBrush}"
+                                     TextWrapping="Wrap" />
+                        </Border>
+                        <StackPanel Spacing="6">
+                          <TextBlock Classes="label" Text="Level" />
+                          <controls:LevelMeter Level="{Binding LevelDb}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </DataTemplate>
+
                     <DataTemplate DataType="vm:GenericNodeViewModel">
                       <StackPanel Spacing="12">
                         <ItemsControl ItemsSource="{Binding Parameters}">

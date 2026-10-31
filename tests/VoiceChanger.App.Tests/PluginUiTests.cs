@@ -47,7 +47,7 @@ public sealed class PluginUiTests : IDisposable
 
         // In the node menu the plug-ins follow the effects.
         var names = vm.NodeEditor.AddNodeMenu.Select(e => e.Name).ToList();
-        Assert.Equal(names.IndexOf("Vocoder") + 1, names.IndexOf(AddMenuEntry.PluginsName));
+        Assert.Equal(names.IndexOf("Invert") + 1, names.IndexOf(AddMenuEntry.PluginsName));
         Assert.Equal(names.IndexOf("Mixer") - 1, names.IndexOf(AddMenuEntry.PluginsName));
         vm.NodeEditor.AddNodeMenu.Single(e => e.Name == AddMenuEntry.PluginsName).Items![0].Items![1].Command!.Execute(null);
         Assert.Equal("Fake Delay", vm.NodeEditor.SelectedNode?.Title);

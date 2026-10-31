@@ -112,7 +112,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         LoadEffects(settings.Effects);
         LoadDevices(settings.InputDeviceId, settings.OutputDeviceId);
 
-        NodeEditor = new NodeEditorViewModel(_graph, _nodeRegistry, InputDevices, OutputDevices);
+        NodeEditor = new NodeEditorViewModel(_graph, _nodeRegistry, InputDevices, OutputDevices) { IsMono = MonoProcessing };
         _graph.EffectsEnabled = EffectsEnabled;
         if (settings.Graph is not null)
         {
@@ -474,7 +474,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedLatencyChanged(LatencyOption value) => RestartIfRunning();
 
-    partial void OnMonoProcessingChanged(bool value) => RestartIfRunning();
+    partial void OnMonoProcessingChanged(bool value)
+    {
+        // The settings set it before the node editor exists; the editor takes it when it is made.
+        if (NodeEditor is not null)
+        {
+            NodeEditor.IsMono = value;
+        }
+
+        RestartIfRunning();
+    }
 
     [RelayCommand]
     private void ResetInputGain() => InputGainDb = 0;

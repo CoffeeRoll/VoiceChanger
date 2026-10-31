@@ -445,6 +445,46 @@ public sealed class NodeEditorTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Split_stereo_and_invert_can_be_added_and_are_remembered()
+    {
+        var store = Store();
+        var (window, vm, editor) = ShowNodes(new MainWindowViewModel(new FakeAudioBackend(), store));
+        Assert.Contains(editor.AddNodeOptions, o => o.Name == "Split Stereo");
+        Assert.Contains(editor.AddNodeOptions, o => o.Name == "Invert");
+        var split = Assert.IsType<StereoSplitNodeViewModel>(editor.AddNode(NodeRegistry.Default.Find(StereoSplitNode.Type)!));
+        var invert = editor.AddNode(NodeRegistry.Default.Find(InvertNode.Type)!);
+        Render(window);
+
+        Assert.Equal(["Stereo"], split.Inputs.Select(p => p.Name));
+        Assert.Equal(["Left", "Right"], split.Outputs.Select(p => p.Name));
+        var view = window.GetVisualDescendants().OfType<NodeView>().Single(v => v.DataContext == split);
+        Assert.Equal(3, view.GetVisualDescendants().OfType<NodeSocket>().Count());
+        Assert.Equal((1, 1), (invert.Inputs.Count, invert.Outputs.Count));
+        Assert.True(invert.IsEffect);
+
+        // Mono is on at first: there is no stereo to split, and the splitter says so.
+        Assert.True(vm.MonoProcessing);
+        editor.SelectedNode = split;
+        Render(window);
+        var notice = window.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "SplitMonoNotice");
+        Assert.True(notice.IsEffectivelyVisible);
+        Assert.Equal("Mono: both outputs the same", split.Summary);
+
+        vm.MonoProcessing = false;
+        Render(window);
+        Assert.False(notice.IsEffectivelyVisible);
+        Assert.False(split.HasSummary);
+        window.Close();
+        vm.Dispose();
+
+        var restored = new MainWindowViewModel(new FakeAudioBackend(), store);
+        Assert.Single(restored.NodeEditor.Nodes, n => n.Node is StereoSplitNode);
+        Assert.Single(restored.NodeEditor.Nodes, n => n.Node is InvertNode);
+        Assert.False(Assert.IsType<StereoSplitNodeViewModel>(restored.NodeEditor.Nodes.Single(n => n.Node is StereoSplitNode)).IsMono);
+        restored.Dispose();
+    }
+
+    [AvaloniaFact]
     public void The_mixer_inspector_adds_inputs_and_mutes_them()
     {
         var (window, vm, editor) = ShowNodes(new MainWindowViewModel(new FakeAudioBackend(), Store()));
