@@ -33,7 +33,7 @@ internal sealed class RemotePlugin : IPluginInstance
     private readonly object _responseGate = new();
     private readonly ManualResetEventSlim _responded = new(false);
     private readonly ManualResetEvent _stuckSignal = new(false);
-    private readonly RegisteredWaitHandle _watchdog;
+    private readonly Thread _watchdog;
     private int _nextId;
     private int _waitingFor;
     private BinaryReader? _response;
@@ -55,8 +55,10 @@ internal sealed class RemotePlugin : IPluginInstance
         _done = done;
         _context = SynchronizationContext.Current;
 
-        // The audio thread only flags a hung host; this kills it (on a thread-pool thread).
-        _watchdog = ThreadPool.RegisterWaitForSingleObject(_stuckSignal, (state, _) => ((RemotePlugin)state!).Kill(), this, Timeout.Infinite, executeOnlyOnce: true);
+        // The audio thread only flags a hung host; a thread of its own kills it, right away even
+        // when the thread pool is busy.
+        _watchdog = new Thread(WatchForHang) { IsBackground = true, Name = $"Plug-in host watchdog ({name})" };
+        _watchdog.Start();
         new Thread(ReadReplies) { IsBackground = true, Name = $"Plug-in host replies ({name})" }.Start();
     }
 
@@ -315,7 +317,9 @@ internal sealed class RemotePlugin : IPluginInstance
             // It ended on its own.
         }
 
-        _watchdog.Unregister(null);
+        // Lets the watchdog go (it kills the host first if it was flagged as hung).
+        _stuckSignal.Set();
+        _watchdog.Join();
         _fromHost.Dispose();
         _process.Dispose();
         _request.Dispose();
@@ -365,15 +369,25 @@ internal sealed class RemotePlugin : IPluginInstance
         return VcPlugin.ErrorFailed;
     }
 
+    /// <summary>Waits until the host is flagged as hung, then kills it; ends when the host is gone or disposed.</summary>
+    private void WatchForHang()
+    {
+        _stuckSignal.WaitOne();
+        if (_stuck)
+        {
+            Kill();
+        }
+    }
+
     private void Kill()
     {
         try
         {
             _process.Kill(entireProcessTree: true);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException)
         {
-            // It ended on its own.
+            // It ended on its own (or one of its own child processes did).
         }
     }
 
@@ -484,8 +498,9 @@ internal sealed class RemotePlugin : IPluginInstance
         _alive = false;
         _responded.Set();
 
-        // Wakes an audio thread waiting for a block that won't come.
+        // Wakes an audio thread waiting for a block that won't come, and lets the watchdog go.
         _done.Post();
+        _stuckSignal.Set();
         if (_disposed)
         {
             return;
