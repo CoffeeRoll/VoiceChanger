@@ -176,6 +176,7 @@ public abstract partial class NodeViewModel : ObservableObject
             EffectNode effect => new EffectNodeViewModel(effect, description),
             MixerNode mixer => new MixerNodeViewModel(mixer, description),
             SyncNode sync => new SyncNodeViewModel(sync, description),
+            StereoSplitNode split => new StereoSplitNodeViewModel(split, description),
             _ => new GenericNodeViewModel(node, description),
         };
         viewModel.SyncPorts();
@@ -706,6 +707,18 @@ public sealed partial class SyncNodeViewModel : NodeViewModel
             port.Detail = offset.Parameter.Value == 0 ? null : offset.DisplayValue;
         }
     }
+}
+
+/// <summary>The stereo splitter, which says when Mono leaves it nothing to split.</summary>
+public sealed partial class StereoSplitNodeViewModel(StereoSplitNode node, string description) : NodeViewModel(node, description)
+{
+    /// <summary>Whether the graph runs in mono, so both outputs carry the same signal.</summary>
+    [ObservableProperty]
+    public partial bool IsMono { get; set; }
+
+    public override string Summary => IsMono ? "Mono: both outputs the same" : "";
+
+    partial void OnIsMonoChanged(bool value) => RefreshSummary();
 }
 
 /// <summary>Nodes without a dedicated editor (the tone generator): every parameter as a row.</summary>

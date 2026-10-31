@@ -18,7 +18,7 @@ public enum NodeCategory
     /// <summary>Changes audio: one input, one output.</summary>
     Effect,
 
-    /// <summary>Combines several signals.</summary>
+    /// <summary>Combines, lines up or splits signals.</summary>
     Mixing,
 
     /// <summary>Plays audio on a device.</summary>

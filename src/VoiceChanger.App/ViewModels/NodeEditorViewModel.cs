@@ -89,6 +89,10 @@ public sealed partial class NodeEditorViewModel : ObservableObject
 
     public bool HasHint => !string.IsNullOrEmpty(Hint);
 
+    /// <summary>Whether the graph runs in mono (the app's Mono setting): then there is no stereo to split.</summary>
+    [ObservableProperty]
+    public partial bool IsMono { get; set; }
+
     /// <summary>Centre of the visible part of the canvas; new nodes from the toolbar go there. Set by the view.</summary>
     public Point ViewCenter { get; set; } = new(400, 250);
 
@@ -238,6 +242,14 @@ public sealed partial class NodeEditorViewModel : ObservableObject
         }
     }
 
+    partial void OnIsMonoChanged(bool value)
+    {
+        foreach (var split in Nodes.OfType<StereoSplitNodeViewModel>())
+        {
+            split.IsMono = value;
+        }
+    }
+
     partial void OnSelectedNodeChanged(NodeViewModel? oldValue, NodeViewModel? newValue)
     {
         oldValue?.IsSelected = false;
@@ -283,6 +295,11 @@ public sealed partial class NodeEditorViewModel : ObservableObject
                     ? MissingEffect.Explanation
                     : _registry.Find(node.TypeId)?.Description ?? "";
                 viewModel = NodeViewModel.Create(node, description, _inputDevices, _outputDevices);
+                if (viewModel is StereoSplitNodeViewModel split)
+                {
+                    split.IsMono = IsMono;
+                }
+
                 var added = viewModel;
                 viewModel.DeleteCommand = new RelayCommand(() => RemoveNode(added));
                 viewModel.DuplicateCommand = new RelayCommand(() =>

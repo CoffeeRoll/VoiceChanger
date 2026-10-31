@@ -101,8 +101,10 @@ Nodes:
 | Audio Input | Audio from a microphone, line input or any other recording device. Add one per device to use several at once. Has its own gain. |
 | Tone Generator | A sine, triangle, sawtooth or square wave, or white noise. Handy for testing a patch, or as a drone under your voice. |
 | Pitch Shifter, Auto Tune, Equalizer, Vocoder | The effects, with the same settings and presets as in the chain. The switch in the node's header turns it on or off. The Vocoder node has a second socket, *Carrier*, for the sound your voice shapes. |
+| Invert | Turns the signal upside down (inverts its polarity). On its own it sounds the same; mixed with the signal it came from, the two cancel out. Fixes a microphone wired the wrong way round, or takes out what two signals share. |
 | Mixer | Combines 2 to 8 signals. Each input has a volume fader, a mute button and a level meter, and there is a master volume. |
 | Synchronizer | Lines up 2 to 8 signals in time, so they play together: each input comes out of its own output, delayed as needed. See [Lining up sources](#lining-up-sources-synchronizer). |
+| Split Stereo | Splits a stereo signal into a *Left* and a *Right* track, each played in the middle, so each can get its own effects or device: for two microphones on the two inputs of one audio interface, say. Needs **Mono** off: in mono every signal is mixed to one channel as it is recorded, and both outputs carry that (the node says so). |
 | Audio Output | Plays the signal on a device. Add one per device to play on several at once, e.g. your headphones and a virtual cable. Has its own volume. |
 
 Working with nodes:
