@@ -34,7 +34,7 @@ public sealed class PsolaPitchShifter : IVoiceShifter
     private const double MinFrequency = 75;
     private const double MaxFrequency = 900;
     private const double UnvoicedSeconds = 0.005;
-    private const double GateDb = -55;
+    private const double GateDb = -65;
     private const double OnsetThreshold = 0.2;
     private const double TrackingCorrelation = 0.5;
     private const double MinTrackRatio = 0.8;
@@ -165,6 +165,14 @@ public sealed class PsolaPitchShifter : IVoiceShifter
     /// Runs on the audio thread.
     /// </summary>
     public PitchCorrection? Correction { get; set; }
+
+    /// <summary>
+    /// When set, told of every mark as it is placed: the period of a pulse (or 0 for unvoiced
+    /// audio) about one period after the pulse comes in, and some 20 ms before it is moved. Marks
+    /// put back to where a voice began come after the unvoiced ones they replace. Runs on the
+    /// audio thread.
+    /// </summary>
+    public PitchObserver? Observer { get; set; }
 
     /// <summary>How far the formants move, as a frequency ratio (1 = they stay put; 0.5 to 2).</summary>
     public double FormantRatio
@@ -668,6 +676,7 @@ public sealed class PsolaPitchShifter : IVoiceShifter
 
         _marks[(_markStart + _markCount) % MaxMarks] = new Mark(position, offset, period, voiced);
         _markCount++;
+        Observer?.Invoke(voiced ? period : 0, position + offset);
         _lastMark = position;
         _lastOffset = offset;
         _lastPeriod = (int)Math.Round(period);

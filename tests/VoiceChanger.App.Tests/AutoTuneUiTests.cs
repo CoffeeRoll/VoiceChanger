@@ -121,6 +121,49 @@ public sealed class AutoTuneUiTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Detect_key_listens_to_the_singing_and_sets_the_key_and_scale()
+    {
+        var (window, vm, backend, autoTune) = ShowWithAutoTune(height: 1000);
+        var button = window.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "DetectKeyButton");
+        Assert.Equal("Detect key", button.Content);
+
+        // Listening before the audio starts asks for it.
+        button.Command!.Execute(null);
+        Assert.True(autoTune.IsDetectingKey);
+        Assert.Contains("Start", autoTune.KeyStatus);
+        Assert.Equal("Stop listening", button.Content);
+
+        // A tune in G major, each note 0.3 s.
+        int[] tune = [67, 71, 74, 71, 72, 71, 69, 67, 62, 66, 69, 72, 71, 69, 67, 67];
+        vm.Start();
+        double phase = 0, time = 0;
+        Sing(vm, backend, t => MusicalScale.NoteToFrequency(tune[(int)(t / 0.3) % tune.Length]), 4, ref phase, ref time);
+        Assert.True(autoTune.IsDetectingKey);
+        Assert.StartsWith("Listening", autoTune.KeyStatus);
+        Assert.InRange(autoTune.KeyProgress, 0.3, 0.7);
+
+        Sing(vm, backend, t => MusicalScale.NoteToFrequency(tune[(int)(t / 0.3) % tune.Length]), 5, ref phase, ref time);
+        Assert.False(autoTune.IsDetectingKey);
+        Assert.Equal("Set to G major.", autoTune.KeyStatus);
+        var effect = (AutoTuneEffect)autoTune.Effect;
+        Assert.Equal(7, effect.Key.IntValue);
+        Assert.Equal((int)ScaleType.Major, effect.Scale.IntValue);
+        Assert.Equal("G major", autoTune.ScaleName);
+        Assert.Equal("Detect key", button.Content);
+
+        // Stopped before it has heard enough, it says so and leaves the key alone.
+        button.Command!.Execute(null);
+        Sing(vm, backend, _ => 440, 1, ref phase, ref time);
+        button.Command!.Execute(null);
+        Assert.False(autoTune.IsDetectingKey);
+        Assert.Contains("Not enough", autoTune.KeyStatus);
+        Assert.Equal(7, effect.Key.IntValue);
+
+        window.Close();
+        vm.Dispose();
+    }
+
+    [AvaloniaFact]
     public void Explains_when_there_is_nothing_to_show()
     {
         var (window, vm, backend, autoTune) = ShowWithAutoTune();

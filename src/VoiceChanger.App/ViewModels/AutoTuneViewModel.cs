@@ -38,6 +38,9 @@ public sealed partial class AutoTuneViewModel : EffectViewModel
     /// <summary>About five seconds of history at the 30 Hz refresh rate.</summary>
     public const int HistoryLength = 150;
 
+    private const string Listening = "Listening… sing a few lines of your song.";
+    private const string PressStart = "Press Start, then sing a few lines of your song.";
+
     private const int StaleTicks = 6;
 
     private readonly AutoTuneEffect _autoTune;
@@ -45,6 +48,7 @@ public sealed partial class AutoTuneViewModel : EffectViewModel
     private readonly double[] _outputHistory = new double[HistoryLength];
     private long _lastSequence = -1;
     private int _ticksWithoutAudio;
+    private bool _isRunning;
 
     public AutoTuneViewModel(AutoTuneEffect autoTune, string description)
         : base(autoTune, description)
@@ -131,8 +135,28 @@ public sealed partial class AutoTuneViewModel : EffectViewModel
     [ObservableProperty]
     public partial double[] OutputHistory { get; private set; } = [];
 
+    /// <summary>Whether it is listening for the key of the song.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DetectKeyText))]
+    public partial bool IsDetectingKey { get; private set; }
+
+    /// <summary>How much of the singing key detection listens to has been heard, from 0 to 1.</summary>
+    [ObservableProperty]
+    public partial double KeyProgress { get; private set; }
+
+    [ObservableProperty]
+    public partial string KeyStatus { get; private set; } = "Sing a few lines of your song and the key and scale are set for you.";
+
+    public string DetectKeyText => IsDetectingKey ? "Stop listening" : "Detect key";
+
     public override void Tick(bool isRunning)
     {
+        _isRunning = isRunning;
+        if (IsDetectingKey)
+        {
+            FollowKeyDetection(isRunning);
+        }
+
         if (!isRunning)
         {
             Clear("Press Start to see the pitch of your voice.");
@@ -162,6 +186,54 @@ public sealed partial class AutoTuneViewModel : EffectViewModel
         {
             RefreshSummary();
         }
+    }
+
+    /// <summary>Starts listening for the key, or stops and uses what was heard so far.</summary>
+    [RelayCommand]
+    private void DetectKey()
+    {
+        if (IsDetectingKey)
+        {
+            IsDetectingKey = false;
+            KeyProgress = 0;
+            Finish(_autoTune.StopKeyDetection());
+            return;
+        }
+
+        _autoTune.StartKeyDetection();
+        IsDetectingKey = true;
+        KeyProgress = 0;
+        KeyStatus = _isRunning ? Listening : PressStart;
+    }
+
+    private void FollowKeyDetection(bool isRunning)
+    {
+        var status = _autoTune.KeyDetection;
+        KeyProgress = status.Progress;
+        if (status.IsListening)
+        {
+            KeyStatus = isRunning ? Listening : PressStart;
+            return;
+        }
+
+        IsDetectingKey = false;
+        KeyProgress = 0;
+        Finish(status.Key);
+    }
+
+    /// <summary>Sets the key that was found and says which.</summary>
+    private void Finish(DetectedKey? key)
+    {
+        if (key is null)
+        {
+            KeyStatus = "Not enough singing was heard to tell the key. Try again and sing for longer.";
+            return;
+        }
+
+        _autoTune.ApplyKey(key);
+        KeyStatus = key.Confidence < 0.3
+            ? $"Set to {key}, but that's a guess: sing for longer for a surer answer."
+            : $"Set to {key}.";
     }
 
     protected override void OnParameterChanged(object? sender, EventArgs e)

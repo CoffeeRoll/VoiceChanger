@@ -47,7 +47,7 @@ public sealed class SpectralVoiceShifter : IVoiceShifter
         // Frames are a hop apart; the detector looks at the last 32 ms and reports the middle of
         // its last three estimates, so its input lags the frame's middle by the rest.
         int hop = _vocoders[0].SamplesUntilFrame;
-        _detector = new PitchDetector(sampleRate, windowSeconds: DetectorWindowSeconds, hopSeconds: (double)hop / sampleRate);
+        _detector = new PitchDetector(sampleRate, gateDb: -65, windowSeconds: DetectorWindowSeconds, hopSeconds: (double)hop / sampleRate);
         int delay = _frameSize / 2 - (int)(DetectorWindowSeconds / 2 * sampleRate) - hop;
         _delay = new float[Math.Max(1, delay)];
         _mono = new float[hop];
@@ -79,6 +79,9 @@ public sealed class SpectralVoiceShifter : IVoiceShifter
             Ratio = _ratio;
         }
     }
+
+    /// <summary>Told of every period the detector gives, as the ratio for that frame is chosen (no earlier).</summary>
+    public PitchObserver? Observer { get; set; }
 
     public double FormantRatio
     {
@@ -125,7 +128,9 @@ public sealed class SpectralVoiceShifter : IVoiceShifter
                 if (count == until)
                 {
                     double period = _detector.IsVoiced ? _sampleRate / _detector.Frequency : 0;
-                    double ratio = Math.Clamp(correction(period, _position + count - _frameSize / 2), 0.25, 4.0);
+                    double time = _position + count - _frameSize / 2;
+                    Observer?.Invoke(period, time);
+                    double ratio = Math.Clamp(correction(period, time), 0.25, 4.0);
                     foreach (var vocoder in _vocoders)
                     {
                         vocoder.Ratio = ratio;

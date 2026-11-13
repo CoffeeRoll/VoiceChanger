@@ -13,7 +13,7 @@ public sealed class VoiceShifterSet
 
     private readonly IVoiceShifter[] _shifters;
 
-    public VoiceShifterSet(int channels, int sampleRate, PitchCorrection? correction = null)
+    public VoiceShifterSet(int channels, int sampleRate, PitchCorrection? correction = null, PitchObserver? observer = null)
     {
         _shifters = Enum.GetValues<VoiceShiftMethod>()
             .Select(method => VoiceShifter.Create(method, channels, sampleRate))
@@ -21,6 +21,7 @@ public sealed class VoiceShifterSet
         foreach (var shifter in _shifters)
         {
             shifter.Correction = correction;
+            shifter.Observer = observer;
         }
     }
 
