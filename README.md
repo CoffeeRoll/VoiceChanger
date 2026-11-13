@@ -242,6 +242,11 @@ Add it with **Add effect → Auto Tune**. While audio is running the card shows:
   it out**: the scale becomes a *Custom* scale with exactly the notes you picked (starting from the
   selected scale), shown as e.g. "Custom: C D E G A". Choose another scale to go back; choosing
   *Custom* again brings your notes back.
+- **Detect key:** press it and sing a few lines of your song (about 8 seconds of singing, with the
+  progress shown). It works out the key from how long you spend on each note and sets *Key* and
+  *Scale* (major or minor) to match. Press **Stop listening** to settle on a key early, once it has
+  heard a few seconds. Pulling to the notes of the song's key instead of all twelve makes the
+  correction more musical, and makes a hard tune step from note to note of the melody.
 
 Settings:
 
@@ -250,12 +255,22 @@ Settings:
 | Key and Scale | The notes your voice is pulled to. *Chromatic* (default) allows all twelve notes and works with any song. Also available: major, minor, harmonic minor, major/minor pentatonic, blues, Dorian and Mixolydian, in any key, and *Custom*: the notes you click on the note strip (the key doesn't apply to it). |
 | Retune speed | How fast the pitch moves to the note. *Instant* (0 ms) gives the hard, robotic sound and flattens vibrato. 20–80 ms sounds like a polished vocal. 150 ms and above corrects gently and keeps slides and vibrato. |
 | Correction | How much of the distance to the note is corrected. 100 % lands exactly on the note. |
+| Humanize | Lets notes you hold keep their natural movement, like vibrato, while each new note is still pulled in at the retune speed: the note settles into tune and then stays alive. 0 % holds every note dead straight. |
 | Transpose | Moves the corrected notes up or down by up to an octave. Your voice keeps its character (like the pitch shifter with *Preserve formants*), so an octave down sounds like a deeper voice, not a slowed-down recording. |
 | Voice method | How your voice is shifted: *Pulse* or *Spectral*, the same choice as in the pitch shifter (see [Voice methods](#voice-methods)). Pulse corrects every pulse of your voice right on time and suits transposing down; Spectral suits transposing up. |
 | Tuning (A4) | Reference pitch. Leave it at 440 Hz unless the music is tuned differently (for example 432 Hz). |
 
 The style presets (*Pop*, *Hard tune*, *Natural*, *Subtle*) only change the correction settings and
-keep your key and scale.
+keep your key and scale. **Hard tune** is the robotic, stepping sound of so much pop and hip hop:
+every note dead flat, and slides and runs jumping from note to note. It sounds best with the song's
+key and scale set (try **Detect key**). *Natural* pulls each note in quickly and then lets its vibrato
+through.
+
+How notes are chosen: the note you are on only changes once your voice has clearly moved to another
+one. A little vibrato, a scoop into a note or one badly heard pulse doesn't change it, so a held note
+stays on one note instead of flickering between two. With the *Pulse* method each pulse is measured
+about 20 ms before it is corrected, so by the time it is, the note it belongs to is already known:
+a change of note lands on the very pulse where you moved, with no added delay.
 
 Notes:
 

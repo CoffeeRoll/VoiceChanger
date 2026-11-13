@@ -10,6 +10,11 @@ namespace VoiceChanger.Core.Dsp;
 /// <returns>Output pitch divided by input pitch from there on.</returns>
 public delegate double PitchCorrection(double period, double time);
 
+/// <summary>Told of every measurement of the voice a <see cref="IVoiceShifter"/> makes, as it makes it.</summary>
+/// <param name="period">Period of the voice at that point, in samples, or 0 for unvoiced audio.</param>
+/// <param name="time">Position in the stream, in samples.</param>
+public delegate void PitchObserver(double period, double time);
+
 /// <summary>
 /// The ways a voice can be shifted while keeping its character (its formants). Every effect that
 /// shifts a voice offers the same choice.
@@ -40,6 +45,13 @@ public interface IVoiceShifter
     /// of the voice at that point. Runs on the audio thread.
     /// </summary>
     PitchCorrection? Correction { get; set; }
+
+    /// <summary>
+    /// When set, told of every measurement of the voice as it is made: the pulse method measures a
+    /// pulse some way ahead of moving it, so a <see cref="Correction"/> can know where the voice goes
+    /// next. Runs on the audio thread.
+    /// </summary>
+    PitchObserver? Observer { get; set; }
 
     /// <summary>How far the formants move, as a frequency ratio (1 = they stay put; 0.5 to 2).</summary>
     double FormantRatio { get; set; }

@@ -136,6 +136,29 @@
       </ItemsControl>
     </StackPanel>
 
+    <!-- Listens to the singing and sets the key and scale. -->
+    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" RowDefinitions="Auto,Auto" RowSpacing="6">
+      <Button x:Name="DetectKeyButton"
+              Content="{Binding DetectKeyText}"
+              Command="{Binding DetectKeyCommand}"
+              VerticalAlignment="Center"
+              ToolTip.Tip="Listens to you sing for a few seconds and sets the key and scale to match the song." />
+      <TextBlock x:Name="KeyStatusText"
+                 Grid.Column="1"
+                 Classes="muted"
+                 Text="{Binding KeyStatus}"
+                 TextWrapping="Wrap"
+                 VerticalAlignment="Center" />
+      <ProgressBar Grid.Row="1"
+                   Grid.ColumnSpan="2"
+                   Minimum="0"
+                   Maximum="1"
+                   Value="{Binding KeyProgress}"
+                   IsVisible="{Binding IsDetectingKey}"
+                   Height="4"
+                   MinHeight="4" />
+    </Grid>
+
     <!-- Settings, two per row. -->
     <ItemsControl ItemsSource="{Binding Settings}" Margin="-12,4,-12,0">
       <ItemsControl.ItemsPanel>

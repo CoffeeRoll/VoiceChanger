@@ -33,6 +33,42 @@ public class PitchCorrectionTests
     }
 
     [Fact]
+    public void Every_pulse_is_measured_well_before_it_is_moved()
+    {
+        double latestSeen = double.NaN;
+        double shortestLead = double.MaxValue;
+        var shifter = new PsolaPitchShifter(1, 48000);
+        shifter.Observer = (period, time) =>
+        {
+            if (period > 0)
+            {
+                latestSeen = double.IsNaN(latestSeen) ? time : Math.Max(latestSeen, time);
+            }
+        };
+        shifter.Correction = (period, time) =>
+        {
+            if (period > 0 && time > 4800)
+            {
+                shortestLead = Math.Min(shortestLead, latestSeen - time);
+            }
+
+            return 1;
+        };
+
+        foreach (double frequency in new[] { 110.0, 200, 400 })
+        {
+            latestSeen = double.NaN;
+            shortestLead = double.MaxValue;
+            shifter.Reset();
+            var signal = PitchDetectorTests.Voice(frequency, 48000, 48000);
+            ProcessInBlocks(signal, 1, 480, block => shifter.Process(block.Span));
+
+            // A note tracker sees at least 7 ms of what comes next (more for higher voices).
+            Assert.InRange(shortestLead, 0.007 * 48000, 0.03 * 48000);
+        }
+    }
+
+    [Fact]
     public void Handles_ratios_that_keep_crossing_one()
     {
         var shifter = new PsolaPitchShifter(1, 48000)
@@ -321,6 +357,148 @@ public class AutoTuneEffectTests
 
         Assert.Equal(69, fast.Reading.OutputNote, 0.05);
         Assert.InRange(slow.Reading.OutputNote, 69.15, 69.4);
+    }
+
+    /// <summary>The pitch of the output every 2.5 ms between two times (in seconds), in cents from <paramref name="reference"/>.</summary>
+    private static List<double> PitchTrack(float[] output, double reference, double from, double to)
+    {
+        var detector = new PitchDetector(SampleRate, windowSeconds: 0.02, hopSeconds: 0.0025);
+        var cents = new List<double>();
+        for (int offset = 0; offset + 120 <= output.Length && offset < to * SampleRate; offset += 120)
+        {
+            if (detector.Process(output.AsSpan(offset, 120)) && detector.IsVoiced && offset >= from * SampleRate)
+            {
+                cents.Add(Cents(detector.Frequency, reference));
+            }
+        }
+
+        return cents;
+    }
+
+    [Theory]
+    [InlineData(VoiceShiftMethod.Pulse)]
+    [InlineData(VoiceShiftMethod.Spectral)]
+    public void Hard_tune_holds_a_wobbly_note_flat_instead_of_flipping(VoiceShiftMethod method)
+    {
+        // A3 sung 30 cents sharp with a ±35 cent vibrato: at its peaks it is closer to A#3.
+        static double Wobbly(double t) => 220 * Math.Pow(2, (30 + 35 * Math.Sin(2 * Math.PI * 5 * t)) / 1200);
+
+        var (effect, output) = Run(Wobbly, 2, e =>
+        {
+            e.RetuneSpeed.Value = 0;
+            e.VoiceMethod.Value = (int)method;
+        });
+
+        var cents = PitchTrack(output, 220, 1, 2);
+        Assert.InRange(cents.Max() - cents.Min(), 0, method == VoiceShiftMethod.Pulse ? 12 : 30);
+        Assert.InRange(cents.Average(), -3, 3);
+        Assert.Equal(57, effect.Reading.TargetNote);
+    }
+
+    /// <summary>
+    /// The length of every cycle of the output's fundamental (from the zero crossings of the output
+    /// filtered below 300 Hz), as the time it ends in seconds and its pitch in cents from <paramref name="reference"/>.
+    /// </summary>
+    private static List<(double End, double Cents)> Cycles(float[] output, double reference)
+    {
+        var low = (float[])output.Clone();
+        var filter = new BiquadFilter(1) { Coefficients = BiquadCoefficients.Design(BiquadType.LowPass, SampleRate, 300, 0.707) };
+        filter.Process(low);
+        filter.Reset();
+        filter.Process(low);
+
+        var cycles = new List<(double, double)>();
+        double previous = double.NaN;
+        for (int i = 1; i < low.Length; i++)
+        {
+            if (low[i - 1] < 0 && low[i] >= 0)
+            {
+                double crossing = i - 1 + low[i - 1] / (low[i - 1] - low[i]);
+                if (!double.IsNaN(previous))
+                {
+                    cycles.Add((crossing / SampleRate, Cents(SampleRate / (crossing - previous), reference)));
+                }
+
+                previous = crossing;
+            }
+        }
+
+        return cycles;
+    }
+
+    [Fact]
+    public void Hard_tune_moves_to_the_next_note_right_where_the_singer_does()
+    {
+        // A3 a little sharp, then A#3 a little flat from 1 s on.
+        var (effect, output) = Run(t => t < 1 ? 222 : 231, 1.6, e => e.RetuneSpeed.Value = 0);
+        var cycles = Cycles(output, 220);
+
+        // Cycle by cycle, the output is exactly on A3 up to the change and exactly on A#3 from a
+        // couple of cycles after it (where the grains of the two pulse rates overlap): the note
+        // tracker needs a few pulses to be sure of the move, but has seen them before it counts.
+        double change = 1 + (double)effect.LatencyFrames / SampleRate;
+        var before = cycles.Where(c => c.End > change - 0.1 && c.End < change - 0.006).ToList();
+        var after = cycles.Where(c => c.End > change + 0.02 && c.End < change + 0.15).ToList();
+        Assert.NotEmpty(before);
+        Assert.NotEmpty(after);
+        Assert.All(before, c => Assert.InRange(c.Cents, -8, 8));
+        Assert.All(after, c => Assert.InRange(c.Cents, 92, 108));
+    }
+
+    [Fact]
+    public void Humanize_lets_held_notes_keep_their_vibrato_but_still_tunes_them()
+    {
+        // A3 sung 25 cents flat with a ±30 cent vibrato.
+        static double Vibrato(double t) => 220 * Math.Pow(2, (-25 + 30 * Math.Sin(2 * Math.PI * 5.5 * t)) / 1200);
+
+        var (_, straight) = Run(Vibrato, 3, e => e.RetuneSpeed.Value = 0);
+        var (_, lively) = Run(Vibrato, 3, e =>
+        {
+            e.RetuneSpeed.Value = 0;
+            e.Humanize.Value = 100;
+        });
+
+        var flat = PitchTrack(straight, 220, 1.5, 3);
+        var natural = PitchTrack(lively, 220, 1.5, 3);
+        Assert.InRange(flat.Max() - flat.Min(), 0, 12);
+        Assert.InRange(natural.Max() - natural.Min(), 40, 70);
+        Assert.InRange(natural.Average(), -6, 6);
+    }
+
+    /// <summary>A tune played from MIDI notes, each <paramref name="noteSeconds"/> long, round and round.</summary>
+    private static Func<double, double> Tune(int[] notes, double noteSeconds = 0.3) =>
+        t => MusicalScale.NoteToFrequency(notes[(int)(t / noteSeconds) % notes.Length]);
+
+    [Theory]
+    [InlineData(new[] { 63, 67, 70, 67, 65, 63, 62, 63, 70, 72, 70, 68, 67, 65, 63, 63 }, 3, ScaleType.Major)] // E-flat major
+    [InlineData(new[] { 57, 60, 64, 62, 60, 59, 57, 52, 57, 59, 60, 62, 64, 60, 59, 57 }, 9, ScaleType.NaturalMinor)] // A minor
+    public void Listening_to_a_tune_finds_its_key(int[] notes, int root, ScaleType scale)
+    {
+        var (effect, _) = Run(Tune(notes), AutoTuneEffect.KeyListenSeconds + 1, e => e.StartKeyDetection());
+
+        var status = effect.KeyDetection;
+        Assert.False(status.IsListening);
+        Assert.Equal(1, status.Progress);
+        Assert.Equal((root, scale), (status.Key!.Root, status.Key.Scale));
+        Assert.InRange(status.Key.Confidence, 0.3, 1);
+
+        effect.ApplyKey(status.Key);
+        Assert.Equal(MusicalScale.ScaleMask(scale, root), effect.ScaleMask);
+    }
+
+    [Fact]
+    public void Key_detection_stopped_early_uses_what_it_heard_if_it_heard_enough()
+    {
+        int[] eFlatMajor = [63, 67, 70, 67, 65, 63, 62, 63, 70, 72, 70, 68, 67, 65, 63, 63];
+        var (tooShort, _) = Run(Tune(eFlatMajor), 2, e => e.StartKeyDetection());
+        Assert.True(tooShort.KeyDetection.IsListening);
+        Assert.Null(tooShort.StopKeyDetection());
+        Assert.False(tooShort.KeyDetection.IsListening);
+
+        var (enough, _) = Run(Tune(eFlatMajor), 5, e => e.StartKeyDetection());
+        var key = enough.StopKeyDetection();
+        Assert.Equal((3, ScaleType.Major), (key!.Root, key.Scale));
+        Assert.Equal(key, enough.KeyDetection.Key);
     }
 
     [Fact]
